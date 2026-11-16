@@ -471,6 +471,10 @@ static int pb_array_method(uint32_t method)
 int hle_d3d8_state_store_simple(uint32_t method, uint32_t value);
 int  hle_d3d8_title_ltcg(void);
 int  hle_d3d8_simple_states_by_walk(void);   /* below */
+/* ...and, for any title, their values in buffer order for the walk's own
+ * draws (hle_d3d8_state.c). */
+void hle_d3d8_walk_simple_seen(uint32_t method, uint32_t value);
+void hle_d3d8_walk_simple_reset(void);
 /* ...and the title's own clears: SET_ZSTENCIL_CLEAR_VALUE (0x1D8C),
  * SET_COLOR_CLEAR_VALUE (0x1D90), CLEAR_SURFACE (0x1D94, which clears) and
  * SET_CLEAR_RECT_HORIZONTAL / _VERTICAL (0x1D98, 0x1D9C). */
@@ -1036,6 +1040,7 @@ void hle_d3d8_push_constants_sync(void)
                 uint32_t m = noninc ? method : method + 4u * i;
                 uint32_t v = HLE_MEM32(va + 4u + 4u * i);
                 if (inl && ((m >= PB_SIMPLE_FIRST && m < PB_SIMPLE_END) || m == PB_SWATH)) {
+                    hle_d3d8_walk_simple_seen(m, v);
                     if (!g_w_nodraw && hle_d3d8_title_ltcg())
                         (void)hle_d3d8_state_store_simple(m, v);
                     else
@@ -1081,6 +1086,7 @@ resync:
     walking = 0;
     pb_flush();
     flush_simple_states();
+    hle_d3d8_walk_simple_reset();
     hle_d3d8_texture_queue_flush();
     g_pb_resyncs++;
     {
