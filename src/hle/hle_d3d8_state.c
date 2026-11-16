@@ -43,7 +43,7 @@
  *
  * Forwarded but not yet used by the host: SHADEMODE, DITHERENABLE,
  * NORMALIZENORMALS, RESULTARG, BUMPENVMAT*, MIPMAPLODBIAS,
- * MAXMIPLEVEL, BORDERCOLOR. Not forwarded: WRAP0-3, VERTEXBLEND, LOCALVIEWER, ZBIAS,
+ * MAXMIPLEVEL, BORDERCOLOR. Not forwarded: WRAP0-3, LOCALVIEWER, ZBIAS,
  * EDGEANTIALIAS, BLENDCOLOR, the back-face material and two-sided lighting
  * states, point sprite and multisample states, and the
  * texture stage states ADDRESSW, BUMPENVLSCALE/LOFFSET,
@@ -438,7 +438,7 @@ static DWORD filter_to_host(uint32_t v)
 /* ------------------------------------------------------------------ apply */
 
 typedef enum {
-    AS_IS, CMP, BLEND, BLENDOP, STENCILOP, COLORWRITE, CULL, FILL, SHADE
+    AS_IS, CMP, BLEND, BLENDOP, STENCILOP, COLORWRITE, CULL, FILL, SHADE, VBLEND
 } rs_kind;
 
 static const struct {
@@ -487,6 +487,12 @@ static const struct {
     { 113, D3DRS_EMISSIVEMATERIALSOURCE, AS_IS },
     { 115, D3DRS_AMBIENT,          AS_IS },
     { 138, D3DRS_FOGCOLOR,         AS_IS },
+    /* Vertex blending: skinned characters weight each vertex between up to
+     * four world matrices. Unforwarded, the host drew every vertex with
+     * world matrix 0, and the parts of Sid Meier's Pirates!' characters
+     * bound to other bones (a head, a jaw) were left where the first bone
+     * put them, or out of sight. */
+    { 137, D3DRS_VERTEXBLEND,      VBLEND },
     { 139, D3DRS_FILLMODE,         FILL },
     { 142, D3DRS_NORMALIZENORMALS, AS_IS },
     { 143, D3DRS_ZENABLE,          AS_IS },
@@ -510,6 +516,14 @@ static DWORD rs_to_host(uint8_t kind, uint32_t v)
     case CULL:       return cull_to_host(v);
     case FILL:       return fill_to_host(v);
     case SHADE:      return shade_to_host(v);
+    case VBLEND:
+        /* The Xbox's D3DVBF_: n WEIGHTS = 2n-1 (n+1 matrices, the last
+         * weight implied), n WEIGHTS n MATRICES = 2n (every weight given).
+         * The host takes the matrix count less one, plus 0x100 when every
+         * weight is given (d3d8_shaders.c). */
+        if (!v || v > 6u)
+            return 0;
+        return (v & 1u) ? (v + 1u) / 2u : ((v / 2u - 1u) | 0x100u);
     }
     return v;
 }

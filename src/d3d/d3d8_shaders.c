@@ -50,6 +50,8 @@ static const char g_vs_source[] =
     "    float4x4 WorldViewInvTranspose;\n" /* inverse-transpose(world*view), for camera-space normals */
     "    float4x4 TexMat[4];\n"             /* per-stage texture matrices */
     "    uint4    TexCoordIndex;\n"         /* per-stage D3DTSS_TEXCOORDINDEX (TCI + set select) */
+    "    float4x4 BlendRel[4];\n"          /* vertex blending: World_i * inverse(World_0) */
+    "    uint4    BlendInfo;\n"            /* x: matrices (0 = off), y: weights all given */
     "};\n"
     "\n"
     "cbuffer LightingCB : register(b1) {\n"
@@ -81,6 +83,7 @@ static const char g_vs_source[] =
     "    float4 tex1     : TEXCOORD1;\n"
     "    float4 tex2     : TEXCOORD2;\n"
     "    float4 tex3     : TEXCOORD3;\n"
+    "    float4 bw       : BLENDWEIGHT;\n"
     "};\n"
     "\n"
     /* The interface every pixel stage reads (here and d3d8_combiners.c,
@@ -191,8 +194,27 @@ static const char g_vs_source[] =
     "        return o;\n"
     "    }\n"
     "\n"
-    "    o.pos = mul(float4(input.pos.xyz, 1.0), WorldViewProj);\n"
-    "    float4 viewPos4 = mul(float4(input.pos.xyz, 1.0), WorldView);\n"
+    /* Vertex blending (D3DRS_VERTEXBLEND): the position and normal moved by
+     * each world matrix in turn, weighted, expressed in world matrix 0's
+     * object space so that everything below stays as it was. With the
+     * weights implicit, the last one is 1 minus the rest. */
+    "    float3 bpos = input.pos.xyz;\n"
+    "    float3 bnrm = input.normal;\n"
+    "    if (BlendInfo.x > 1u) {\n"
+    "        float wts[4] = { input.bw.x, input.bw.y, input.bw.z, input.bw.w };\n"
+    "        float rest = 1.0;\n"
+    "        float3 p = float3(0, 0, 0), q = float3(0, 0, 0);\n"
+    "        for (uint k = 0; k < BlendInfo.x && k < 4u; k++) {\n"
+    "            float w = (k + 1u == BlendInfo.x && BlendInfo.y == 0u) ? rest : wts[k];\n"
+    "            rest -= wts[k];\n"
+    "            p += w * mul(float4(input.pos.xyz, 1.0), BlendRel[k]).xyz;\n"
+    "            q += w * mul(input.normal, (float3x3)BlendRel[k]);\n"
+    "        }\n"
+    "        bpos = p;\n"
+    "        bnrm = q;\n"
+    "    }\n"
+    "    o.pos = mul(float4(bpos, 1.0), WorldViewProj);\n"
+    "    float4 viewPos4 = mul(float4(bpos, 1.0), WorldView);\n"
     "    o.viewpos = viewPos4;\n"
     "    float3 posCam = viewPos4.xyz;\n"
     "    float3 nrmCam = float3(0, 0, 1);\n"
@@ -205,8 +227,8 @@ static const char g_vs_source[] =
     "    // World-space normal (lighting) and camera-space normal (TCI / fog)\n"
     "    float3 worldNormal = float3(0, 0, 1);\n"
     "    if (Flags & FLAG_HAS_NORMAL) {\n"
-    "        worldNormal = normalize(mul(input.normal, (float3x3)WorldInvTranspose));\n"
-    "        nrmCam = normalize(mul(input.normal, (float3x3)WorldViewInvTranspose));\n"
+    "        worldNormal = normalize(mul(bnrm, (float3x3)WorldInvTranspose));\n"
+    "        nrmCam = normalize(mul(bnrm, (float3x3)WorldViewInvTranspose));\n"
     "    }\n"
     "\n"
     "    // Texture coordinates: per-stage TEXCOORDINDEX + texture matrix\n"
@@ -217,7 +239,7 @@ static const char g_vs_source[] =
     "\n"
     "    // Lighting\n"
     "    if ((Flags & FLAG_LIGHTING) && (Flags & FLAG_HAS_NORMAL)) {\n"
-    "        float3 worldPos = mul(float4(input.pos.xyz, 1.0), World).xyz;\n"
+    "        float3 worldPos = mul(float4(bpos, 1.0), World).xyz;\n"
     "        float3 viewDir = normalize(EyePos.xyz - worldPos);\n"
     "\n"
     /* Each material colour from where D3DRS_*MATERIALSOURCE says: the
@@ -285,7 +307,7 @@ static const char g_vs_source[] =
     "\n"
     "    // Vertex fog (FOGVERTEXMODE)\n"
     "    if ((uint)FogParams.w != 0u) {\n"
-    "        float3 worldPos = mul(float4(input.pos.xyz, 1.0), World).xyz;\n"
+    "        float3 worldPos = mul(float4(bpos, 1.0), World).xyz;\n"
     "        float fogDist = length(EyePos.xyz - worldPos);\n"
     "        o.fog = compute_fog(fogDist);\n"
     "    }\n"
@@ -691,6 +713,8 @@ typedef struct {
     float world_view_inv_transpose[16]; /* inverse-transpose(World*View) */
     float tex_mat[4][16];        /* per-stage texture matrices (column-major) */
     UINT  texcoord_index[4];     /* per-stage D3DTSS_TEXCOORDINDEX */
+    float blend_rel[4][16];      /* World_i * inverse(World_0) (column-major) */
+    UINT  blend_info[4];         /* matrices (0 = off), all weights given */
 } VSTransformConstants;
 
 /* VS lighting constant buffer layout (must match HLSL LightingCB) */
@@ -781,6 +805,22 @@ static RhiVertexLayout *get_or_create_layout(DWORD fvf)
         elem_count++;
     }
     offset = d3d8_fvf_position_bytes(fvf);
+
+    /* BLENDWEIGHT: the weights between the position and the normal
+     * (XYZB1-5), at most four of them read. Absent, a one-float dummy at 0
+     * that the shader ignores (BlendInfo.x is 0 then). */
+    {
+        UINT nw = offset > 16u ? (offset - 12u) / 4u : 0u;
+        static const RhiFormat wfmt[5] = {
+            RHI_FORMAT_R32_FLOAT, RHI_FORMAT_R32_FLOAT, RHI_FORMAT_R32G32_FLOAT,
+            RHI_FORMAT_R32G32B32_FLOAT, RHI_FORMAT_R32G32B32A32_FLOAT
+        };
+        if (!d3d8_fvf_transformed(fvf) && nw)
+            elems[elem_count] = (RhiVertexElement){"BLENDWEIGHT", 0, wfmt[nw > 4u ? 4u : nw], 0, 12};
+        else
+            elems[elem_count] = (RhiVertexElement){"BLENDWEIGHT", 0, RHI_FORMAT_R32_FLOAT, 0, 0};
+        elem_count++;
+    }
 
     /* NORMAL */
     if (fvf & D3DFVF_NORMAL) {
@@ -1108,6 +1148,30 @@ static void ff_vs_prepare_draw(DWORD fvf)
                 cb->eye_pos[2] = view_inv[14];
                 cb->eye_pos[3] = 1.0f;
             }
+        }
+
+        /* Vertex blending, for a draw whose vertices carry weights: the
+         * host D3DRS_VERTEXBLEND is the matrix count less one (D3D's
+         * 1-3WEIGHTS), plus 0x100 when every weight is given rather than
+         * the last implied (the Xbox's nWEIGHTSnMATRICES). */
+        if (!d3d8_fvf_transformed(fvf) && rs && rs[D3DRS_VERTEXBLEND] &&
+            d3d8_fvf_position_bytes(fvf) > 16u) {
+            UINT mats = (rs[D3DRS_VERTEXBLEND] & 0xFFu) + 1u;
+            float w0_inv[16];
+            UINT k;
+
+            if (mats > 4u)
+                mats = 4u;
+            mat4_inverse(w0_inv, (const float *)d3d8_GetTransform(D3DTS_WORLD));
+            for (k = 0; k < mats; k++) {
+                float rel[16], rel_t[16];
+                mat4_mul(rel, (const float *)d3d8_GetTransform((D3DTRANSFORMSTATETYPE)(D3DTS_WORLD + k)),
+                         w0_inv);
+                mat4_transpose(rel_t, rel);
+                memcpy(cb->blend_rel[k], rel_t, sizeof(rel_t));
+            }
+            cb->blend_info[0] = mats;
+            cb->blend_info[1] = (rs[D3DRS_VERTEXBLEND] & 0x100u) ? 1u : 0u;
         }
 
         if (fvf & D3DFVF_DIFFUSE) cb->flags |= 0x02;
