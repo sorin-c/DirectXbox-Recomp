@@ -341,6 +341,12 @@ typedef struct NV2APSConstants {
     UINT  fog_src;
     UINT  fog_range;                        /* range fog: |distance| */
     UINT  fog_pad[2];
+    /* Bump-environment stages (BUMPENVMAP, BUMPENVMAP_LUM): the stage's
+     * 2x2 matrix (D3DTSS_BUMPENVMAT00, 01, 10, 11), and whether the source
+     * stage's texel is already signed on the host (a SNORM bump format: 1)
+     * or is an unsigned colour whose bytes the NV2A reads as signed (0). */
+    float bump_mat[NV2A_MAX_TEXTURES][4];
+    UINT  bump_signed[NV2A_MAX_TEXTURES];
 } NV2APSConstants;
 
 /* NV2APSConstants.fog_src. The fog unit sits before the combiners, so their
