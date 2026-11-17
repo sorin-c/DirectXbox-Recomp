@@ -2940,10 +2940,11 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
          * which silently breaks every timeout that polls it: Halo's DHCP setup
          * waits on a tick deadline that never arrives and spins forever bringing
          * up XNet. A live clock is also just the truth -- KeTickCount ticks on
-         * hardware whether or not anyone is asleep. GetTickCount() shares the
-         * millisecond unit, so the rate matches. */
+         * hardware whether or not anyone is asleep. Milliseconds from the
+         * performance counter, not GetTickCount, whose 15.6 ms steps a title
+         * pacing on this clock waits out whole (xbox_TickCountMs). */
         *(volatile uint32_t *)((uintptr_t)(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT)
-                               + g_memory_offset) = GetTickCount();
+                               + g_memory_offset) = xbox_TickCountMs();
 
         nv2a_ack_wait();
     }
