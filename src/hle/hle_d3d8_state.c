@@ -603,7 +603,7 @@ static DWORD ts_to_host(uint8_t kind, uint32_t v)
  * which is what Burnout 2's road does.
  *
  * The two numberings run in different orders, hence the groups. Xbox
- * PSCOMPAREMODE (42) has no host state and is not forwarded;
+ * PSCOMPAREMODE (42) goes to the host's 255 (CLIPPLANE stages);
  * PSFINALCOMBINERCONSTANT0/1 (43, 44) go to the host's 198/199, which the
  * final combiner's C0 and C1 read. */
 static const struct { uint8_t xbox; uint8_t host; uint8_t count; } g_ps_map[] = {
@@ -617,6 +617,7 @@ static const struct { uint8_t xbox; uint8_t host; uint8_t count; } g_ps_map[] = 
     { 53, 234, 1 },      /* PSCOMBINERCOUNT                    */
     { 43, 198, 2 },      /* PSFINALCOMBINERCONSTANT0, 1        */
     { 55, 252, 2 },      /* PSDOTMAPPING, PSINPUTTEXTURE       */
+    { 42, 255, 1 },      /* PSCOMPAREMODE (CLIPPLANE stages)   */
 };
 
 /* PSTextureModes holds one mode per texture stage, 5 bits each over 4 stages
