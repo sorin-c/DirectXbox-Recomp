@@ -415,6 +415,10 @@ typedef enum D3DRENDERSTATETYPE {
      * with the texture coordinate's r/q (a shadow map). A D3DCMPFUNC; 0
      * while the title has not set it. */
     D3DRS_SHADOWFUNC               = 254,
+    /* Xbox D3DRS_PSCOMPAREMODE: for a CLIPPLANE texture stage, 4 bits a
+     * stage (s, t, r, q; stage i at bit 4*i): 0 kills the pixel when that
+     * coordinate is below zero, 1 when it is zero or above. */
+    D3DRS_PSCOMPAREMODE            = 255,
 } D3DRENDERSTATETYPE;
 
 #define D3D8_PSTEXTUREMODES_XBOX 0x80000000u

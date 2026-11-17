@@ -417,6 +417,7 @@ void d3d8_combiners_from_render_states(const DWORD *rs,
         state->xmode[i] = NV2A_XMODE_UNKNOWN;
         state->dot_map[i] = 0;
         state->input_tex[i] = 0;
+        state->compare_mode[i] = 0;
     }
     if (state->tex_mode[0] == 0 && state->tex_mode[1] == 0 &&
         state->tex_mode[2] == 0 && state->tex_mode[3] == 0) {
@@ -435,6 +436,8 @@ void d3d8_combiners_from_render_states(const DWORD *rs,
             state->dot_map[1] = (uint8_t)(dm & 0xF);
             state->dot_map[2] = (uint8_t)((dm >> 4) & 0xF);
             state->dot_map[3] = (uint8_t)((dm >> 8) & 0xF);
+            for (i = 0; i < NV2A_MAX_TEXTURES; i++)
+                state->compare_mode[i] = (uint8_t)((rs[D3DRS_PSCOMPAREMODE] >> (4 * i)) & 0xF);
             state->input_tex[2] = (uint8_t)((it >> 16) & 0xF);
             state->input_tex[3] = (uint8_t)((it >> 20) & 0xF);
             for (i = 2; i < NV2A_MAX_TEXTURES; i++)
@@ -714,8 +717,8 @@ static int emit_shadow_compare(char *buf, int bufsize, int *poff, int i)
  * order (a dependent stage reads an earlier one). Each mode as xemu's
  * psh.c has it, with these differences: BUMPENVMAP and BUMPENVMAP_LUM look
  * up their own coordinates without the bump offset (the bump-environment
- * matrix is a texture stage state not forwarded yet), CLIPPLANE kills
- * nothing (PSCOMPAREMODE is not forwarded), DOT_ZW does not replace depth.
+ * matrix is a texture stage state not forwarded yet), DOT_ZW does not
+ * replace depth.
  * A mode at a stage the hardware does not allow it at reads zero. */
 static int emit_xbox_textures(const NV2ACombinerState *state, char *buf,
                               int bufsize, int *poff)
@@ -827,7 +830,21 @@ static int emit_xbox_textures(const NV2ACombinerState *state, char *buf,
             EMIT("    r_t%d = tex%d.Sample(samp%d, r_t%d.%s * tex_scale[%d].xy);\n",
                  i, i, i, in, m == XTM_DPNDNT_AR ? "ar" : "gb", i);
             break;
-        default:            /* CLIPPLANE, BRDF, DOT_RFLCT_SPEC_CONST: zero */
+        case XTM_CLIPPLANE: {
+            /* The pixel is killed when any of s, t, r, q fails its test
+             * (PSCOMPAREMODE: bit clear, below zero kills; set, zero or
+             * above), as xemu's psh.c has it; the register reads zero.
+             * Pirates! thins its world-map forests this way: each tree's
+             * stage-0 coordinate is the cell's tree density less a half, so
+             * without it every forest tile was drawn whole, a square block. */
+            static const char comp[4] = { 'x', 'y', 'z', 'w' };
+            int j;
+            for (j = 0; j < 4; j++)
+                EMIT("    if (input.tc%d.%c %s 0.0) discard;\n", i, comp[j],
+                     (state->compare_mode[i] >> j) & 1 ? ">=" : "<");
+            break;
+        }
+        default:            /* BRDF, DOT_RFLCT_SPEC_CONST: zero */
             break;
         }
         if (state->tex_mode[i] != NV2A_TEXMODE_NONE)

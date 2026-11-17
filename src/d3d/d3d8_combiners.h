@@ -248,6 +248,7 @@ typedef struct NV2ACombinerState {
     uint8_t xmode[NV2A_MAX_TEXTURES];
     uint8_t dot_map[NV2A_MAX_TEXTURES];
     uint8_t input_tex[NV2A_MAX_TEXTURES];
+    uint8_t compare_mode[NV2A_MAX_TEXTURES];   /* PSCOMPAREMODE, a CLIPPLANE stage's */
 
     /* --- Flags --- */
     DWORD flags;     /* Dot mapping and other flags from token bits 24-31 */
