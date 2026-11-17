@@ -718,6 +718,9 @@ ULONG_PTR __stdcall xbox_MmGetPhysicalAddress(PVOID BaseAddress);
 
 VOID    __stdcall xbox_MmPersistContiguousMemory(PVOID BaseAddress, ULONG NumberOfBytes, BOOLEAN Persist);
 ULONG   __stdcall xbox_MmQueryAddressProtect(PVOID VirtualAddress);
+/* Record the Xbox protection a contiguous allocation was made with, so
+ * MmQueryAddressProtect can report bits the host has no equivalent for. */
+void    xbox_ContiguousProtectNote(uint32_t xbox_va, uint32_t size, uint32_t protect);
 VOID    __stdcall xbox_MmSetAddressProtect(PVOID BaseAddress, ULONG NumberOfBytes, ULONG NewProtect);
 ULONG   __stdcall xbox_MmQueryAllocationSize(PVOID BaseAddress);
 PVOID   __stdcall xbox_MmClaimGpuInstanceMemory(ULONG NumberOfBytes, PULONG NumberOfPaddingBytes);

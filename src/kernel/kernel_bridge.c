@@ -839,6 +839,8 @@ static void bridge_MmAllocateContiguousMemory(void)
      * hands the hardware. See xbox_ContiguousAlloc. */
     uint32_t xbox_va = xbox_ContiguousAlloc(size, 4096);
 
+    if (xbox_va)    /* MmAllocateContiguousMemory is the Ex call with PAGE_READWRITE */
+        xbox_ContiguousProtectNote(xbox_va, size, 0x04);
     if (KERNEL_LOG_ON_HALF()) {
         fprintf(stderr, "  [KERNEL] MmAllocateContiguousMemory: size=%u → Xbox VA 0x%08X\n",
                 size, xbox_va);
@@ -904,8 +906,6 @@ static void bridge_MmAllocateContiguousMemoryEx(void)
     uint32_t prot = STACK_ARG(4);
     uint32_t xbox_va;
 
-    (void)prot;
-
     /*
      * A caller that constrains the range to exactly one allocation's worth is
      * demanding a specific physical address, not expressing a preference.
@@ -925,6 +925,9 @@ static void bridge_MmAllocateContiguousMemoryEx(void)
         memset((void *)((uintptr_t)xbox_va + g_xbox_mem_offset), 0, size);
         /* And the arena must not hand these pages out again. */
         xbox_ContiguousPin(xbox_va, size);
+        /* What MmQueryAddressProtect answers for these pages: the host
+         * has no write-combine or no-cache bits to report them from. */
+        xbox_ContiguousProtectNote(xbox_va, size, prot);
 
         if (KERNEL_LOG_ON_HALF()) {
             fprintf(stderr, "  [KERNEL] MmAllocateContiguousMemoryEx: size=%u "
@@ -938,6 +941,8 @@ static void bridge_MmAllocateContiguousMemoryEx(void)
 
     if (align < 4096) align = 4096;
     xbox_va = xbox_ContiguousAlloc(size, align);
+    if (xbox_va)
+        xbox_ContiguousProtectNote(xbox_va, size, prot);
 
     if (KERNEL_LOG_ON_HALF()) {
         fprintf(stderr, "  [KERNEL] MmAllocateContiguousMemoryEx: size=%u align=%u → Xbox VA 0x%08X\n",
