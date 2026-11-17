@@ -353,6 +353,18 @@ static int readable(const char *path)
 
 /* ------------------------------------------------------------ settings */
 
+/* The frame interpolation a title starts with: 1 (off) unless its
+ * CMakeLists says otherwise (RECOMP_TITLE_DEFAULT_FRAME_INTERP on
+ * xbox_config). Also the fallback where nothing sets frame_interp. */
+int recomp_settings_default_frame_interp(void)
+{
+#if defined(RECOMP_TITLE_DEFAULT_FRAME_INTERP)
+    return RECOMP_TITLE_DEFAULT_FRAME_INTERP;
+#else
+    return 1;
+#endif
+}
+
 void recomp_settings_defaults(RecompSettings *s)
 {
     if (!s)
@@ -367,7 +379,7 @@ void recomp_settings_defaults(RecompSettings *s)
     s->fps_overlay       = 0;
     s->fullscreen        = 0;
     s->vrr               = 1;
-    s->frame_interp      = 1;
+    s->frame_interp      = recomp_settings_default_frame_interp();
     s->mouse_look        = 0;
     s->mouse_sensitivity = RECOMP_MOUSE_SENSITIVITY_DEFAULT;
 #if defined(__ANDROID__)
