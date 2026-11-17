@@ -177,9 +177,47 @@ VOID __stdcall xbox_MmPersistContiguousMemory(PVOID BaseAddress, ULONG NumberOfB
     XBOX_TRACE(XBOX_LOG_MEM, "MmPersistContiguousMemory(%p, %u, %d) - stub", BaseAddress, NumberOfBytes, Persist);
 }
 
+/* The Xbox protection of each page in the contiguous window, as the title
+ * asked for it (0 = never set).
+ *
+ * The host's page protection cannot answer MmQueryAddressProtect for these
+ * pages: PAGE_WRITECOMBINE and PAGE_NOCACHE have no host equivalent, so a
+ * page allocated with PAGE_READWRITE | PAGE_WRITECOMBINE (0x404) reads back
+ * as plain PAGE_READWRITE. Titles branch on those bits. Pirates! builds its
+ * two contiguous heaps with 0x404, and when one fills up it asks for the
+ * protection of the heap's base to decide where the overflow goes: with
+ * write-combine set, to MmAllocateContiguousMemoryEx (an address above both
+ * heaps); without it, to malloc. A malloc'd low address freed through the
+ * D3D free hook, which sets bit 31 to make a contiguous address of it, lands
+ * inside the other heap's range and is freed into that heap. The heap's
+ * block chain then runs through a live block, and the next coalesce reads a
+ * garbage size and faults (the town sneak's quit-to-menu crash). */
+extern ptrdiff_t g_xbox_mem_offset;
+static uint16_t g_contig_protect[XBOX_CONTIG_SIZE / 4096u];
+
+void xbox_ContiguousProtectNote(uint32_t xbox_va, uint32_t size, uint32_t protect)
+{
+    uint32_t page, end;
+
+    if (xbox_va < XBOX_CONTIG_BASE || !size || protect > 0xFFFFu)
+        return;
+    page = (xbox_va - XBOX_CONTIG_BASE) / 4096u;
+    end = (uint32_t)(((uint64_t)xbox_va - XBOX_CONTIG_BASE + size + 4095u) / 4096u);
+    if (end > XBOX_CONTIG_SIZE / 4096u)
+        end = XBOX_CONTIG_SIZE / 4096u;
+    for (; page < end; page++)
+        g_contig_protect[page] = (uint16_t)protect;
+}
+
 ULONG __stdcall xbox_MmQueryAddressProtect(PVOID VirtualAddress)
 {
     MEMORY_BASIC_INFORMATION mbi;
+    uint32_t xbox_va = (uint32_t)((uintptr_t)VirtualAddress - (uintptr_t)g_xbox_mem_offset);
+
+    if (xbox_va >= XBOX_CONTIG_BASE &&
+        (uint64_t)xbox_va < (uint64_t)XBOX_CONTIG_BASE + XBOX_CONTIG_SIZE &&
+        g_contig_protect[(xbox_va - XBOX_CONTIG_BASE) / 4096u])
+        return g_contig_protect[(xbox_va - XBOX_CONTIG_BASE) / 4096u];
     if (VirtualQuery(VirtualAddress, &mbi, sizeof(mbi))) {
         /* Return the Xbox-equivalent protection */
         return mbi.Protect;
@@ -190,6 +228,8 @@ ULONG __stdcall xbox_MmQueryAddressProtect(PVOID VirtualAddress)
 VOID __stdcall xbox_MmSetAddressProtect(PVOID BaseAddress, ULONG NumberOfBytes, ULONG NewProtect)
 {
     DWORD old_protect;
+    xbox_ContiguousProtectNote((uint32_t)((uintptr_t)BaseAddress - (uintptr_t)g_xbox_mem_offset),
+                               NumberOfBytes, NewProtect);
 #ifdef _WIN32
     VirtualProtect(BaseAddress, NumberOfBytes, xbox_protect_to_win32(NewProtect), &old_protect);
 #else
