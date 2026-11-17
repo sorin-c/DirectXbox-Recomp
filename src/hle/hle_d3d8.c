@@ -1276,6 +1276,12 @@ uint32_t hle_d3d8_shadow_program_object(void)
     return g_shadow_vs_is_program ? (g_shadow_vs & ~1u) : 0u;
 }
 
+/* The FVF selected now; 0 under a program or a declaration. */
+uint32_t hle_d3d8_shadow_fvf(void)
+{
+    return g_shadow_vs_is_program ? 0u : g_shadow_vs;
+}
+
 /* The stream a buffer draw takes its vertices from under the program
  * selected now (struct shadow_program, base_stream); 0 under an FVF. */
 uint32_t hle_d3d8_shadow_base_stream(void)
