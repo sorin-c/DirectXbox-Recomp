@@ -902,6 +902,29 @@ const float *hle_d3d8_interp_constants(void)
     return g_constants;
 }
 
+/* View, projection and world 0-3, as host_SetTransform last set them. */
+static float g_ff_xf[6][16] = {
+    { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 },
+    { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 },
+    { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 },
+    { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 },
+    { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 },
+    { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 },
+};
+
+const float *hle_d3d8_interp_ff_transforms(void)
+{
+    return &g_ff_xf[0][0];
+}
+
+static void track_transform(DWORD state, const D3DMATRIX *m)
+{
+    int slot = state == D3DTS_VIEW ? 0 : state == D3DTS_PROJECTION ? 1 :
+               state >= 256u && state < 260u ? 2 + (int)(state - 256u) : -1;
+    if (slot >= 0)
+        memcpy(g_ff_xf[slot], m, sizeof g_ff_xf[slot]);
+}
+
 static void retain_call(void (*fn)(const void *), const void *fixed, size_t fixed_size,
                         const void *a, size_t a_size, const void *b, size_t b_size,
                         const HleInterpDrawKey *key)
@@ -964,6 +987,17 @@ static void draw_key(HleInterpDrawKey *k, DWORD type, UINT prims, UINT stride,
      * for it. A fixed-function draw is not blended. */
     k->uses_proj = d3d8_vsh_is_programmable(g_bound_vs) &&
                    d3d8_vsh_bound_uses_projection();
+    /* A fixed-function draw is blended through its transforms instead:
+     * world (one more matrix per blend weight), view and projection; not
+     * one already in screen space (XYZRHW). */
+    k->ff_worlds = 0;
+    if (!d3d8_vsh_is_programmable(g_bound_vs)) {
+        DWORD pos = g_bound_vs & 0x00Eu;
+        if (pos && pos != 0x004u) {
+            int w = pos >= 0x006u ? (int)((pos - 0x004u) / 2u) + 1 : 1;
+            k->ff_worlds = w > 4 ? 4 : w;
+        }
+    }
 }
 
 /* ------------------------------------------------------------ device calls */
@@ -1102,6 +1136,8 @@ HRESULT host_SetTransform(IDirect3DDevice8 *dev, D3DTRANSFORMSTATETYPE state,
         p.m = *matrix;
         hle_d3d8_interp_op(op_transform, &p, sizeof p);
     }
+    if (matrix)
+        track_transform((DWORD)state, matrix);
     if (g_cap && matrix)
         rec_transform((DWORD)state, matrix);
     return dev->lpVtbl->SetTransform(dev, state, matrix);
