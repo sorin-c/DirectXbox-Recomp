@@ -317,8 +317,9 @@ void xbox_Nv2aFlipGateSetTitleInterval(uint32_t interval);
  * and the time it expects the release (the next vblank), both
  * QueryPerformanceCounter ticks; fn does what is due and returns when it
  * wants to be called again, or 0 for not again this frame. The release ends
- * the loan whatever fn wanted. Only while the cadence is one Swap a vblank
- * (adaptive, or a cap of the vblank rate). NULL takes it back. */
+ * the loan whatever fn wanted. Whenever the gate releases on vblanks, at any
+ * number of them per Swap; not when it is off or paced by the host clock.
+ * NULL takes it back. */
 typedef long long (*xbox_FlipGateIdleFn)(long long now, long long release);
 void xbox_Nv2aFlipGateSetIdle(xbox_FlipGateIdleFn fn);
 
@@ -326,6 +327,14 @@ void xbox_Nv2aFlipGateSetIdle(xbox_FlipGateIdleFn fn);
  * RECOMP_FPS_CAP asked for that is not a stop on the cycle), and the next
  * one along. For a key the player presses while the title runs. */
 const char *xbox_Nv2aFlipGateModeName(void);
+
+/* How many vblanks each Swap waits for now: 1 at one a vblank, 2 at 30 on a
+ * 60 Hz vblank, 0 when the gate does not hold Swaps to vblanks (off, or paced
+ * by the host clock above the vblank rate). What the title asked for with its
+ * presentation interval, unless the player's frame cap decides; a title that
+ * hands its own frame pacing to the gate checks this first, since the
+ * player's cap or the on-screen toggle can overrule it at any time. */
+int xbox_Nv2aFlipGateVblanksPerSwap(void);
 
 /* While the title is held at its Swap (host_suspended), what presents the
  * held frame again when the host asks (host_request_redraw). Set by the
