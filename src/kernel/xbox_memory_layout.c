@@ -2310,6 +2310,13 @@ static int flip_gate_mode_index(void)
     return -1;
 }
 
+int xbox_Nv2aFlipGateVblanksPerSwap(void)
+{
+    int d = flip_gate_divisor();
+
+    return g_flip_gate_host_hz ? 0 : d;
+}
+
 const char *xbox_Nv2aFlipGateModeName(void)
 {
     static char host[16];
