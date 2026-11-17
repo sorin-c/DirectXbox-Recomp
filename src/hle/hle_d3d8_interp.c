@@ -73,6 +73,8 @@
 #include "recomp_config.h"
 #include "../kernel/xbox_memory_layout.h"
 
+IDirect3DDevice8 *hle_d3d8_shadow_device(void);   /* hle_d3d8.c */
+
 #define INTERP_MAX_MULTIPLE  8
 #define INTERP_MAX_AFFINE    64                  /* registers */
 #define INTERP_MAX_REGS      (4 + INTERP_MAX_AFFINE)
@@ -104,6 +106,8 @@ typedef struct {
     size_t     len, cap;
     InterpDraw *draws;
     float     *regs;                             /* g_nregs float4s a draw */
+    float     *ff;                               /* FF_FLOATS a draw: view, projection,
+                                                  * world 0-3 (fixed-function draws) */
     int        ndraws, cap_draws;
     uint8_t   *retire;                           /* ops run when the list is done */
     size_t     rlen, rcap;
@@ -126,6 +130,10 @@ static InterpList g_list[2];
 static int        g_cur;                         /* the list being kept */
 static Prepared  *g_prep;                        /* g_groups a draw of the current list */
 static int        g_prep_cap;
+#define FF_MATS    6                             /* view, projection, world 0-3 */
+#define FF_FLOATS  (FF_MATS * 16)
+static Prepared  *g_ffprep;                      /* FF_MATS a draw (the projection's unused) */
+static int        g_ffprep_cap;
 
 /* This frame, in the gate. */
 static int        g_prepared, g_frame_ok, g_slot;
@@ -222,6 +230,12 @@ void hle_d3d8_interp_draw(void (*fn)(const void *arg), const void *arg, size_t s
             return;
         }
         l->regs = g;
+        g = (float *)realloc(l->ff, (size_t)n * FF_FLOATS * sizeof(float));
+        if (!g) {
+            l->whole = 0;
+            return;
+        }
+        l->ff = g;
         l->cap_draws = n;
     }
     l->draws[l->ndraws].key = *key;
@@ -235,6 +249,9 @@ void hle_d3d8_interp_draw(void (*fn)(const void *arg), const void *arg, size_t s
         key->uses_proj && g_proj >= 0 && (d3d8_vsh_bound_reads(g_proj, 4) & 1u);
     l->draws[l->ndraws].groups =
         key->uses_proj && g_aff_count ? d3d8_vsh_bound_reads(g_aff_first, g_aff_count) : 0;
+    if (key->ff_worlds)
+        memcpy(l->ff + (size_t)l->ndraws * FF_FLOATS, hle_d3d8_interp_ff_transforms(),
+               FF_FLOATS * sizeof(float));
     r = l->regs + (size_t)l->ndraws * (size_t)g_nregs * 4;
     if (g_proj >= 0) {
         memcpy(r, c + g_proj * 4, 16 * sizeof(float));
@@ -592,6 +609,41 @@ static const float *regs_of(const InterpList *l, int i)
     return l->regs + (size_t)i * (size_t)g_nregs * 4;
 }
 
+static const float *ff_of(const InterpList *l, int i)
+{
+    return l->ff + (size_t)i * FF_FLOATS;
+}
+
+/* A D3D matrix (row vectors, translation in the last row) as the four
+ * registers a program would read (translation in the last column), and
+ * back: the layout prepare_group and blend_group take. */
+static void ff_to_regs(const float *m, float *r)
+{
+    int i, j;
+    for (i = 0; i < 4; i++)
+        for (j = 0; j < 4; j++)
+            r[i * 4 + j] = m[j * 4 + i];
+}
+
+/* Fixed-function draw i: its view and world matrices made ready to blend
+ * (slot 0 the view, 2-5 the worlds; slot 1, the projection, is blended
+ * term by term when drawn). */
+static void prepare_ff(int i, const float *a, const float *b, int worlds, int *cut)
+{
+    float ra[16], rb[16];
+    int m;
+
+    for (m = 0; m < FF_MATS; m++) {
+        Prepared *p = &g_ffprep[i * FF_MATS + m];
+        p->ok = 0;
+        if (m == 1 || (m >= 2 && m - 2 >= worlds))
+            continue;
+        ff_to_regs(a + m * 16, ra);
+        ff_to_regs(b + m * 16, rb);
+        prepare_group(p, ra, rb, cut);
+    }
+}
+
 /* Match frame N (the list kept) to N-1 and get every matched 3D draw's
  * matrices ready; decide whether the frame can be interpolated. */
 static int prepare_frame(void)
@@ -622,10 +674,30 @@ static int prepare_frame(void)
         g_prep = p;
         g_prep_cap = n;
     }
+    if (cur->ndraws * FF_MATS > g_ffprep_cap) {
+        int n = cur->ndraws * FF_MATS * 2;
+        Prepared *p = (Prepared *)realloc(g_ffprep, (size_t)n * sizeof *p);
+        if (!p) {
+            g_held_other++;
+            return 0;
+        }
+        g_ffprep = p;
+        g_ffprep_cap = n;
+    }
     match_frames(cur, prev);
     for (i = 0; i < cur->ndraws; i++) {
         InterpDraw *d = &cur->draws[i];
 
+        if (d->key.ff_worlds) {
+            prims3d += d->key.prims;
+            if (d->match < 0 || !prev->draws[d->match].key.ff_worlds)
+                continue;
+            matched += d->key.prims;
+            prepare_ff(i, ff_of(prev, d->match), ff_of(cur, i), d->key.ff_worlds, &d->cut);
+            if (d->cut)
+                cut += d->key.prims;
+            continue;
+        }
         if (!d->key.uses_proj)
             continue;
         prims3d += d->key.prims;
@@ -723,6 +795,61 @@ static void set_draw_registers(int i, double a)
 
 /* ---------------------------------------------------------- drawing it */
 
+/* Fixed-function draw i's transforms at a: blended where it was matched,
+ * N's own otherwise. Set straight on the device, so the recording's view of
+ * the transforms (hle_d3d8_interp_ff_transforms) stays N's. */
+static void set_draw_transforms(int i, double a)
+{
+    static const D3DTRANSFORMSTATETYPE state[FF_MATS] = {
+        D3DTS_VIEW, D3DTS_PROJECTION, (D3DTRANSFORMSTATETYPE)256, (D3DTRANSFORMSTATETYPE)257,
+        (D3DTRANSFORMSTATETYPE)258, (D3DTRANSFORMSTATETYPE)259
+    };
+    const InterpList *cur = &g_list[g_cur], *prev = &g_list[g_cur ^ 1];
+    const InterpDraw *d = &cur->draws[i];
+    const float *b = ff_of(cur, i);
+    IDirect3DDevice8 *dev = hle_d3d8_shadow_device();
+    int blend = d->match >= 0 && !d->cut && prev->draws[d->match].key.ff_worlds;
+    int m, k;
+
+    if (!dev)
+        return;
+    for (m = 0; m < FF_MATS; m++) {
+        float out[16], r[16];
+        if (m >= 2 && m - 2 >= d->key.ff_worlds)
+            break;
+        memcpy(out, b + m * 16, sizeof out);
+        if (blend && m == 1) {
+            const float *pa = ff_of(prev, d->match) + 16;
+            /* the same kind of projection both sides (its last column), or
+             * it is a change of view, not motion */
+            if (pa[3] == b[16 + 3] && pa[7] == b[16 + 7] && pa[11] == b[16 + 11] &&
+                pa[15] == b[16 + 15])
+                for (k = 0; k < 16; k++)
+                    out[k] = (float)((1.0 - a) * pa[k] + a * b[16 + k]);
+        } else if (blend && g_ffprep[i * FF_MATS + m].ok) {
+            blend_group(&g_ffprep[i * FF_MATS + m], a, r);
+            ff_to_regs(r, out);                  /* its own inverse */
+        }
+        dev->lpVtbl->SetTransform(dev, state[m], (const D3DMATRIX *)out);
+    }
+}
+
+/* Back to the transforms frame N left. */
+static void restore_transforms(void)
+{
+    static const D3DTRANSFORMSTATETYPE state[FF_MATS] = {
+        D3DTS_VIEW, D3DTS_PROJECTION, (D3DTRANSFORMSTATETYPE)256, (D3DTRANSFORMSTATETYPE)257,
+        (D3DTRANSFORMSTATETYPE)258, (D3DTRANSFORMSTATETYPE)259
+    };
+    const float *f = hle_d3d8_interp_ff_transforms();
+    IDirect3DDevice8 *dev = hle_d3d8_shadow_device();
+    int m;
+
+    if (dev)
+        for (m = 0; m < FF_MATS; m++)
+            dev->lpVtbl->SetTransform(dev, state[m], (const D3DMATRIX *)(f + m * 16));
+}
+
 static void redraw(double a)
 {
     InterpList *cur = &g_list[g_cur];
@@ -743,8 +870,11 @@ static void redraw(double a)
     hle_d3d8_interp_rec = 0;                     /* what is drawn now is not kept */
     for (off = 0; off < cur->len; ) {
         op_header *h = (op_header *)(cur->ops + off);
-        if (h->draw >= 0)
+        if (h->draw >= 0) {
             set_draw_registers(h->draw, a);
+            if (cur->draws[h->draw].key.ff_worlds)
+                set_draw_transforms(h->draw, a);
+        }
         h->fn(h->size ? (const void *)(h + 1) : NULL);
         off += sizeof(op_header) + INTERP_ALIGN(h->size);
     }
@@ -762,6 +892,7 @@ static void redraw(double a)
         d3d8_vsh_set_constant(g_proj, c + g_proj * 4, 4);
     if (g_aff_count)
         d3d8_vsh_set_constant(g_aff_first, c + g_aff_first * 4, g_aff_count);
+    restore_transforms();
     hle_d3d8_overlay_redraw();
     {
         /* The moment it goes to the screen. A present can then block --
@@ -874,6 +1005,8 @@ static void follow_registers(void)
         int i;
         for (i = 0; i < 2; i++) {
             free(g_list[i].regs);
+            free(g_list[i].ff);
+            g_list[i].ff = NULL;
             free(g_list[i].draws);
             g_list[i].regs = NULL;
             g_list[i].draws = NULL;
