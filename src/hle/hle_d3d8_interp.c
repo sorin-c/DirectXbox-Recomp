@@ -930,6 +930,12 @@ static long long gate_idle(long long now, long long release)
     }
     if (!g_frame_ok || span <= g_qpf / 1000 || span > g_qpf / 10)
         return 0;
+    /* A strict 60 (frame_cap = 60): each present waits for a vblank, so
+     * an in-between frame between two the title draws a vblank apart costs
+     * the title a vblank -- Pirates!' menus ran at 40-50. Only a title
+     * frame two vblanks or more apart (a game at 30) has room for one. */
+    if (span < g_qpf / 40 && strcmp(xbox_Nv2aFlipGateModeName(), "60") == 0)
+        return 0;
     while (g_slot < g_multiple) {
         LONGLONG due = g_last_present + span * g_slot / g_multiple;
         LONGLONG start = due - g_redraw_est;
@@ -1028,7 +1034,8 @@ void hle_d3d8_interp_init(void)
     if (done)
         return;
     done = 1;
-    n = recomp_config_int("RECOMP_FRAME_INTERP", "frame_interp", 0);
+    n = recomp_config_int("RECOMP_FRAME_INTERP", "frame_interp",
+                          recomp_settings_default_frame_interp());
     if (n < 2)
         return;
     if (n > INTERP_MAX_MULTIPLE)

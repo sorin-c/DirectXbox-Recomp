@@ -275,6 +275,7 @@ typedef struct RecompSettings {
 #define RECOMP_MOUSE_SENSITIVITY_MAX     100
 
 void recomp_settings_defaults(RecompSettings *s);
+int  recomp_settings_default_frame_interp(void);
 
 /* Read the file at `path` into `s`, starting from the defaults. Absent
  * keys keep their default, so an older file gains new settings rather
