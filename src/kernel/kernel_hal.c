@@ -337,10 +337,48 @@ KIRQL __stdcall xbox_KeRaiseIrqlToDpcLevel(void)
 
 volatile ULONG xbox_KeTickCount = 0;
 
+/* The millisecond clock KeTickCount shows.
+ *
+ * GetTickCount is the host's scheduler tick, and it moves in steps of
+ * 15.625 ms whatever timeBeginPeriod says. The console's KeTickCount moves
+ * every millisecond, and titles pace on it: Pirates! ends each frame by
+ * sleeping until KeTickCount is 31 ms past the frame's start. With 15.625 ms
+ * steps a frame that took 1-15 ms waited two whole steps instead, so every
+ * frame took exactly 31.25 ms; a title waiting less than a step waits a whole
+ * one.
+ *
+ * So count milliseconds from the performance counter, starting where
+ * GetTickCount was when first asked, so the value still means "milliseconds
+ * since the host booted" to a title that compares it with anything. */
+ULONG xbox_TickCountMs(void)
+{
+    static LONGLONG base_qpc, freq;
+    static ULONG base_ms;
+    static volatile LONG ready;
+    LARGE_INTEGER now;
+
+    if (!ready) {
+        LARGE_INTEGER f, c;
+        QueryPerformanceFrequency(&f);
+        QueryPerformanceCounter(&c);
+        if (InterlockedCompareExchange(&ready, 2, 0) == 0) {
+            freq = f.QuadPart ? f.QuadPart : 1000;
+            base_qpc = c.QuadPart;
+            base_ms = GetTickCount();
+            InterlockedExchange(&ready, 1);
+        }
+        while (ready != 1)
+            YieldProcessor();
+    }
+    QueryPerformanceCounter(&now);
+    return base_ms + (ULONG)(((now.QuadPart - base_qpc) / freq) * 1000
+                             + ((now.QuadPart - base_qpc) % freq) * 1000 / freq);
+}
+
 /* Call this periodically or on-demand to update KeTickCount */
 static void xbox_update_tick_count(void)
 {
-    xbox_KeTickCount = GetTickCount();
+    xbox_KeTickCount = xbox_TickCountMs();
 }
 
 /* ============================================================================

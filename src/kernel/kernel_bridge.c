@@ -229,7 +229,7 @@ static void kernel_data_init(void)
 
     /* KeTickCount (ordinal 156) - initialized to current tick count.
      * A background thread in main.c updates this every ~1ms. */
-    BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT) = GetTickCount();
+    BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT) = xbox_TickCountMs();
 
     /* LaunchDataPage (ordinal 164).
      *
@@ -2611,7 +2611,6 @@ static void bridge_KeDelayExecutionThread(void)
     uint32_t alertable    = STACK_ARG(1);
     BRIDGE_ALERTABLE_APCS(alertable);
     uint32_t interval_ptr = STACK_ARG(2);
-
 
     g_eax = (uint32_t)xbox_KeDelayExecutionThread(
         (KPROCESSOR_MODE)wait_mode, (BOOLEAN)alertable,
