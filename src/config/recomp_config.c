@@ -300,6 +300,18 @@ static void title_file(char *out, size_t n, const char *dir)
         snprintf(out, n, "%s%ctitles%cdefault.conf", dir, sep, sep);
 }
 
+/* The folder the title's settings file is in when it is not the running
+ * executable's: a self-building release's launcher is in the release, and
+ * the game it starts in the player's build folder, so the launcher points
+ * this at the game's folder and both read and write one file. Empty: the
+ * executable's own folder. */
+static char g_title_settings_dir[1024];
+
+void recomp_settings_set_title_dir(const char *dir)
+{
+    snprintf(g_title_settings_dir, sizeof g_title_settings_dir, "%s", dir ? dir : "");
+}
+
 /* The title's settings file in the running executable's folder, or 0. */
 static int beside_exe_file(char *out, size_t n)
 {
@@ -307,6 +319,14 @@ static int beside_exe_file(char *out, size_t n)
     char exe[1024];
     char *slash;
     size_t len;
+
+    if (g_title_settings_dir[0]) {
+        size_t dl = strlen(g_title_settings_dir);
+        char last = g_title_settings_dir[dl - 1];
+        snprintf(out, n, "%s%s%s", g_title_settings_dir,
+                 (last == '/' || last == '\\') ? "" : "/", RECOMP_TITLE_SETTINGS_FILE);
+        return 1;
+    }
 
 #  if defined(_WIN32)
     len = (size_t)GetModuleFileNameA(NULL, exe, (DWORD)sizeof exe);
@@ -362,6 +382,41 @@ int recomp_settings_default_frame_interp(void)
     return RECOMP_TITLE_DEFAULT_FRAME_INTERP;
 #else
     return 1;
+#endif
+}
+
+/* A title's display defaults, said in its CMakeLists on xbox_config like
+ * its widescreen mode, so that a prebuilt engine (a self-building release)
+ * honours them too: the renderer is built once for every title, xbox_config
+ * per title. 0 when the title says nothing.
+ *
+ *   RECOMP_TITLE_CROP_BOTTOM=<rows>        guest rows left off the bottom
+ *   RECOMP_TITLE_CROP_LEFT_WIDE=<columns>  guest columns off the left, 16:9 only
+ *   RECOMP_TITLE_PIXEL_OFFSET_SCALED=1     half a host pixel of offset */
+int recomp_title_crop_bottom(void)
+{
+#if defined(RECOMP_TITLE_CROP_BOTTOM)
+    return RECOMP_TITLE_CROP_BOTTOM;
+#else
+    return 0;
+#endif
+}
+
+int recomp_title_crop_left_wide(void)
+{
+#if defined(RECOMP_TITLE_CROP_LEFT_WIDE)
+    return RECOMP_TITLE_CROP_LEFT_WIDE;
+#else
+    return 0;
+#endif
+}
+
+int recomp_title_pixel_offset_scaled(void)
+{
+#if defined(RECOMP_TITLE_PIXEL_OFFSET_SCALED)
+    return 1;
+#else
+    return 0;
 #endif
 }
 

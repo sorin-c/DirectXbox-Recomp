@@ -483,7 +483,7 @@ static int create(UINT taps)
 
 /* The game's bottom rows left off the screen (crop_bottom, guest rows,
  * RECOMP_CROP_BOTTOM; a title's default from RECOMP_TITLE_CROP_BOTTOM on
- * xbox_d3d8), the rest stretched to fill the picture. Pirates! draws its sea
+ * xbox_config), the rest stretched to fill the picture. Pirates! draws its sea
  * a grey-lavender for the last eight rows of the frame, on the console too;
  * eight of 480 is a 1.7% stretch nobody sees. A title's default is fixed:
  * no setting turns it off. -1 until read. */
@@ -492,11 +492,9 @@ static int g_crop_bottom = -1;
 int xbox_D3D8CropBottom(void)
 {
     if (g_crop_bottom < 0) {
-#if defined(RECOMP_TITLE_CROP_BOTTOM)
-        g_crop_bottom = RECOMP_TITLE_CROP_BOTTOM;
-#else
-        g_crop_bottom = recomp_config_int("RECOMP_CROP_BOTTOM", "crop_bottom", 0);
-#endif
+        int def = recomp_title_crop_bottom();
+        g_crop_bottom = def ? def
+                            : recomp_config_int("RECOMP_CROP_BOTTOM", "crop_bottom", 0);
         if (g_crop_bottom < 0 || g_crop_bottom > 64)
             g_crop_bottom = 0;
     }
@@ -515,14 +513,15 @@ static int g_crop_left = -1;
 int xbox_D3D8CropLeft(void)
 {
     if (g_crop_left < 0) {
-#if defined(RECOMP_TITLE_CROP_LEFT_WIDE)
-        UINT gw = d3d8_GetGuestWidth(), gh = d3d8_GetGuestHeight();
-        if (!gw || !gh)
-            return 0;                       /* not known yet: ask again */
-        g_crop_left = gw * 3u > gh * 4u + gh / 4u ? RECOMP_TITLE_CROP_LEFT_WIDE : 0;
-#else
-        g_crop_left = recomp_config_int("RECOMP_CROP_LEFT", "crop_left", 0);
-#endif
+        int wide = recomp_title_crop_left_wide();
+        if (wide) {
+            UINT gw = d3d8_GetGuestWidth(), gh = d3d8_GetGuestHeight();
+            if (!gw || !gh)
+                return 0;                   /* not known yet: ask again */
+            g_crop_left = gw * 3u > gh * 4u + gh / 4u ? wide : 0;
+        } else {
+            g_crop_left = recomp_config_int("RECOMP_CROP_LEFT", "crop_left", 0);
+        }
         if (g_crop_left < 0 || g_crop_left > 64)
             g_crop_left = 0;
     }
