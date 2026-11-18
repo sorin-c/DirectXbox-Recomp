@@ -76,6 +76,11 @@ int    recomp_config_int(const char *env_name, const char *key, int fallback);
 int    recomp_config_bool(const char *env_name, const char *key, int fallback);
 double recomp_config_float(const char *env_name, const char *key, double fallback);
 
+/* RECOMP_HEADLESS / `headless`: a scripted test run that must leave the
+ * desk alone -- window off-screen and never active, no real input device
+ * read or written. Implies RECOMP_WINDOW_BACKGROUND. See recomp_config.c. */
+int    recomp_headless(void);
+
 /* The file the lookups read, for a log line or a launcher; NULL when no
  * file was found. */
 const char *recomp_config_path(void);

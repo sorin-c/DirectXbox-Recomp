@@ -623,7 +623,20 @@ static DWORD WINAPI shadow_window_thread(LPVOID param)
      * WS_EX_NOACTIVATE keeps the focus where it is however the window is
      * shown. WS_EX_APPWINDOW keeps it on the taskbar, which NOACTIVATE
      * would otherwise take it off. */
-    {
+    int x = CW_USEDEFAULT, y = CW_USEDEFAULT;
+
+    if (recomp_headless()) {
+        /* Headless (recomp_headless): off every monitor, off the taskbar and
+         * Alt+Tab (a tool window), never activated. It is still a shown,
+         * unminimised window, so the device presents to it and the frame
+         * rate is what it would be on screen: a minimised or hidden window
+         * is one DXGI calls occluded, and a test of timing would measure
+         * that instead. Left of the whole virtual desktop, where no monitor
+         * can be. */
+        ex_style = WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+        x = GetSystemMetrics(SM_XVIRTUALSCREEN) - (r.right - r.left) - 256;
+        y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    } else {
         const char *bg = getenv("RECOMP_WINDOW_BACKGROUND");
 
         if (bg && *bg && strcmp(bg, "0") != 0)
@@ -632,7 +645,7 @@ static DWORD WINAPI shadow_window_thread(LPVOID param)
     req->hwnd = CreateWindowExA(ex_style, wc.lpszClassName,
                               "xboxrecomp - D3D8 replacement (shadow)",
                               WS_OVERLAPPEDWINDOW,
-                              CW_USEDEFAULT, CW_USEDEFAULT,
+                              x, y,
                               r.right - r.left, r.bottom - r.top,
                               NULL, NULL, wc.hInstance, NULL);
     /* RECOMP_WINDOW_BACKGROUND=1: open behind the other windows and without
@@ -2291,9 +2304,83 @@ static void ram_dump_at_swap(void)
     }
 }
 
+/* RECOMP_SHOT_REQUEST=<file>: pictures for a script, from inside the game.
+ *
+ * A headless run's window is off the desktop (recomp_headless), and a
+ * background one sits under whatever the person is using, so a screenshot
+ * of the window is either impossible or a picture of something else. The
+ * script writes a request file instead and the next finished frame is
+ * written where it asks. The file holds one line, the BMP to write:
+ *
+ *     K:/runs/sea_01.bmp            the frame
+ *     capture K:/runs/sea_01.bmp    the frame, and a replayable capture
+ *                                    as F11 makes one (beside the executable)
+ *
+ * Write the request to another name and rename it into place, so it is
+ * never read half-written. The game deletes it when it takes it, and writes
+ * the picture under a temporary name first, so the BMP appearing means it
+ * is complete. Checked every 50 ms at a swap; nothing is read when the
+ * variable is unset. */
+static char g_shot_path[1024];
+
+static void shot_request_poll(void)
+{
+    static int configured;
+    static const char *req;
+    static ULONGLONG next;
+    char buf[1100];
+    size_t n;
+    char *p;
+    FILE *f;
+    ULONGLONG now;
+
+    if (!configured) {
+        configured = 1;
+        req = getenv("RECOMP_SHOT_REQUEST");
+        if (req && !*req)
+            req = NULL;
+        if (req) {
+            fprintf(stderr, "[HLE-D3D8] pictures on request: %s\n", req);
+            fflush(stderr);
+        }
+    }
+    if (!req || g_shot_path[0])
+        return;
+    now = GetTickCount64();
+    if (now < next)
+        return;
+    next = now + 50;
+    f = fopen(req, "rb");
+    if (!f)
+        return;
+    n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    remove(req);
+    while (n && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ' ||
+                 buf[n - 1] == '\t'))
+        buf[--n] = 0;
+    p = buf;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (strncmp(p, "capture ", 8) == 0) {
+        p += 8;
+        while (*p == ' ')
+            p++;
+        hle_d3d8_capture_next_frame();
+    }
+    if (!*p) {
+        fprintf(stderr, "[HLE-D3D8] picture request without a file name, ignored\n");
+        return;
+    }
+    snprintf(g_shot_path, sizeof g_shot_path, "%s", p);
+    g_dump_requested = 1;
+}
+
 static void shadow_dump_frame(void)
 {
     ram_dump_at_swap();
+    shot_request_poll();
     static const char *prefix;
     static int configured, every = 300, written, keep_last, max_files = 24;
     static unsigned long min_draws, last_dump, from_swap;
@@ -2349,6 +2436,22 @@ static void shadow_dump_frame(void)
      * no prefix was given -- so pressing the key is the whole procedure. */
     asked = g_dump_requested;
     g_dump_requested = 0;
+    if (asked && g_shot_path[0]) {
+        /* A script's picture (RECOMP_SHOT_REQUEST): its own name, written
+         * whole before it appears under it. */
+        char tmp[1100];
+
+        snprintf(tmp, sizeof tmp, "%s.part", g_shot_path);
+        remove(tmp);
+        if (dump_back_buffer(tmp) == 0) {
+            remove(g_shot_path);
+            if (rename(tmp, g_shot_path) == 0)
+                fprintf(stderr, "[HLE-D3D8] shadow frame %lu -> %s (requested)\n",
+                        g_shadow_swaps, g_shot_path);
+        }
+        g_shot_path[0] = 0;
+        return;
+    }
     if (asked && (!prefix || !*prefix)) {
         hle_d3d8_beside_exe(asked_prefix, sizeof asked_prefix, "frame");
         prefix = asked_prefix;

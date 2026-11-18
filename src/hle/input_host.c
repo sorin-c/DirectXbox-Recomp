@@ -22,6 +22,7 @@
  */
 #include "input_host.h"
 #include "input_bindings.h"
+#include "recomp_config.h"   /* recomp_headless */
 
 /* <windows.h> on Windows, the POSIX shim (GetTickCount64) elsewhere. */
 #include "platform/xbox_winnt.h"
@@ -378,7 +379,10 @@ bool recomp_input_host_sample_port(unsigned port, RecompInputGamepad *gamepad)
     if (gamepad == NULL)
         return false;
     memset(gamepad, 0, sizeof *gamepad);
-    if (!(port == 0 && seq_owns_pad()) && recomp_bindings_sample(port, &pad)) {
+    /* Headless: no real device on any port, the script's presses below are
+     * the only input (recomp_headless). */
+    if (!(port == 0 && seq_owns_pad()) && !recomp_headless() &&
+        recomp_bindings_sample(port, &pad)) {
         gamepad->buttons = (uint16_t)pad.wButtons;
         for (i = 0; i < RECOMP_INPUT_ANALOG_BUTTON_COUNT; i++)
             gamepad->analog_buttons[i] = pad.bAnalogButtons[i];
