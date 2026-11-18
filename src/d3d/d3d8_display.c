@@ -466,9 +466,38 @@ static int create(UINT taps)
     return 1;
 }
 
+/* The game's bottom rows left off the screen (crop_bottom, guest rows,
+ * RECOMP_CROP_BOTTOM; a title's default from RECOMP_TITLE_CROP_BOTTOM on
+ * xbox_d3d8), the rest stretched to fill the picture. Pirates! draws its sea
+ * a grey-lavender for the last eight rows of the frame, on the console too;
+ * eight of 480 is a 1.7% stretch nobody sees. -1 until read; the settings
+ * menu sets it live. */
+static int g_crop_bottom = -1;
+
+void xbox_D3D8SetCropBottom(int rows)
+{
+    g_crop_bottom = rows < 0 ? 0 : rows;
+}
+
+int xbox_D3D8CropBottom(void)
+{
+    if (g_crop_bottom < 0) {
+#if defined(RECOMP_TITLE_CROP_BOTTOM)
+        int def = RECOMP_TITLE_CROP_BOTTOM;
+#else
+        int def = 0;
+#endif
+        g_crop_bottom = recomp_config_int("RECOMP_CROP_BOTTOM", "crop_bottom", def);
+        if (g_crop_bottom < 0 || g_crop_bottom > 64)
+            g_crop_bottom = 0;
+    }
+    return g_crop_bottom;
+}
+
 HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
                              RhiView *out, D3D8DisplayFit fit)
 {
+    UINT used_h = scene_h;
     RhiOutputState saved;
     RhiViewport vp;
     float blend_factor[4] = { 1, 1, 1, 1 };
@@ -477,6 +506,11 @@ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
 
     if (!scene || !out || !fit.w || !fit.h || !scene_h)
         return E_INVALIDARG;
+    {
+        UINT gh = d3d8_GetGuestHeight(), crop = (UINT)xbox_D3D8CropBottom();
+        if (crop && gh > crop * 4u)
+            used_h = scene_h - (UINT)((unsigned long long)crop * scene_h / gh);
+    }
 
     /* Square taps, from the vertical ratio: the horizontal one is the
      * same whenever the fit preserved the scene's shape, which it does,
@@ -495,7 +529,7 @@ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
         c.origin_x = (float)fit.x;
         c.origin_y = (float)fit.y;
         c.ratio_x = (float)scene_w / (float)fit.w;
-        c.ratio_y = (float)scene_h / (float)fit.h;
+        c.ratio_y = (float)used_h / (float)fit.h;
         c.texel_x = 1.0f / (float)scene_w;
         c.texel_y = 1.0f / (float)scene_h;
         c.inv_taps = 1.0f / (float)(taps * taps);
