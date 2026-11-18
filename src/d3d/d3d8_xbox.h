@@ -1199,6 +1199,10 @@ void xbox_D3D8SetPresentInterval(UINT interval);
  * what reaches the screen rather than the scene (d3d8_replay --present).
  * Presented returns the last copy and its size, or NULL. */
 void           xbox_D3D8KeepPresented(BOOL on);
+/* Guest rows left off the bottom of the picture, the rest stretched to fill
+ * it (d3d8_display.c, crop_bottom): now, and set live. */
+int            xbox_D3D8CropBottom(void);
+void           xbox_D3D8SetCropBottom(int rows);
 const uint8_t *xbox_D3D8Presented(UINT *width, UINT *height);
 /* The size the guest presents at, for its screen-space geometry; the HLE
  * sets it from the title's present parameters (d3d8_GetGuestWidth). */

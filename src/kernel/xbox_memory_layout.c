@@ -2185,6 +2185,9 @@ int xbox_EnvSwitch(const char *name, int default_on)
              _stricmp(v, "no") == 0 || _stricmp(v, "false") == 0);
 }
 
+static int flip_gate_effective_divisor(void);
+static int g_flip_gate_ceiling;     /* RECOMP_TITLE_INTERVAL_CEILING */
+
 static int flip_gate_divisor(void)
 {
     if (g_flip_gate_divisor < 0) {
@@ -2281,6 +2284,9 @@ void xbox_Nv2aFlipGateSetTitleInterval(uint32_t interval)
         }
     }
     g_flip_gate_title = n;
+    /* Read here, not at the first Swap: a title sets it from its own code,
+     * which may run after the gate has started. */
+    g_flip_gate_ceiling = xbox_EnvSwitch("RECOMP_TITLE_INTERVAL_CEILING", 0);
     flip_gate_divisor();                    /* reads the player's cap, once */
     if (g_flip_gate_user) {
         fprintf(stderr, "  [NV2A] flip gate: the title asks for one Swap per %d vblank(s) "
@@ -2312,7 +2318,7 @@ static int flip_gate_mode_index(void)
 
 int xbox_Nv2aFlipGateVblanksPerSwap(void)
 {
-    int d = flip_gate_divisor();
+    int d = flip_gate_effective_divisor();
 
     return g_flip_gate_host_hz ? 0 : d;
 }
@@ -2358,13 +2364,34 @@ void xbox_Nv2aFlipGateSetIdle(xbox_FlipGateIdleFn fn)
     g_flip_gate_idle = fn;
 }
 
+/* The divisor the gate actually releases on. A strict cap from the player
+ * (frame_cap = 60) normally decides over the title's interval, but a title
+ * that sets RECOMP_TITLE_INTERVAL_CEILING=1 has the cap read as a ceiling:
+ * a title asking for fewer Swaps than the cap allows gets them. Pirates! asks
+ * for INTERVAL_TWO in its 30 fps scenes only while frame interpolation is on,
+ * and at a strict 60 that request was overruled: the sea loop then presented
+ * every vblank, half of them repeats, and interpolation had no gap to fill.
+ * The same with the cap off: off means no ceiling, not that the title's own
+ * interval is ignored -- and with the gate never waiting there was no wait
+ * for interpolation to draw in, so Pirates!' sea stayed at 30. The cap's
+ * name (F9 overlay, F10, the settings menu) stays the player's. */
+static int flip_gate_effective_divisor(void)
+{
+    int d = flip_gate_divisor();
+
+    if (g_flip_gate_ceiling && !g_flip_gate_host_hz && g_flip_gate_title > 1 &&
+        (d == 0 || (g_flip_gate_strict && g_flip_gate_title > d)))
+        return g_flip_gate_title;
+    return d;
+}
+
 /* When the gate opens next: the next vblank at one Swap a vblank, and at d
  * the next vblank whose count is a multiple of d (xbox_Nv2aFlipGateRelease
  * opens it on those only). A title held to 30 is still given the whole
  * two-vblank wait to lend. */
 static LONGLONG flip_gate_next_release(void)
 {
-    int d = flip_gate_divisor();
+    int d = flip_gate_effective_divisor();
     LONG n = InterlockedCompareExchange(&g_flip_gate_vblanks, 0, 0);
     LONG ahead = d > 1 ? d - (LONG)(n % d) : 1;
 
@@ -2478,7 +2505,7 @@ void xbox_Nv2aFlipGateArm(void)
     static int said;
 
     flip_gate_hold_suspended();
-    if (flip_gate_divisor() == 0)
+    if (flip_gate_effective_divisor() == 0)
         return;
     if (g_flip_gate_host_hz) {
         flip_gate_host_paced();
@@ -2488,7 +2515,7 @@ void xbox_Nv2aFlipGateArm(void)
         return;                                         /* no vblank has ever come */
     if (!g_flip_gate_event)
         return;
-    if (g_flip_gate_strict)
+    if (g_flip_gate_strict && flip_gate_divisor() != 0)
         ResetEvent(g_flip_gate_event);                  /* the next vblank, not a past one */
     {
         /* Swap is an HLE call, not a kernel call, so the guest lock is still
@@ -2501,7 +2528,7 @@ void xbox_Nv2aFlipGateArm(void)
 
         /* Whenever the gate releases on vblanks: the hook is told which
          * vblank will release it (flip_gate_next_release). */
-        if (!(g_flip_gate_idle && flip_gate_divisor() >= 1 && flip_gate_lend()) &&
+        if (!(g_flip_gate_idle && flip_gate_effective_divisor() >= 1 && flip_gate_lend()) &&
             WaitForSingleObject(g_flip_gate_event, 250) == WAIT_TIMEOUT && !said++) {
             fprintf(stderr, "  [NV2A] flip gate timed out: no vblank for 250 ms, "
                             "the title is not being paced\n");
@@ -2514,7 +2541,7 @@ void xbox_Nv2aFlipGateArm(void)
 void xbox_Nv2aFlipGateRelease(void)
 {
     LONG n = InterlockedIncrement(&g_flip_gate_vblanks);
-    int d = flip_gate_divisor();
+    int d = flip_gate_effective_divisor();
     LARGE_INTEGER now;
 
     QueryPerformanceCounter(&now);
