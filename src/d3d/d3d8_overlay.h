@@ -38,6 +38,12 @@ extern "C" {
  * menu -- carries the line as it is now. Called on the presenting thread. */
 void d3d8_overlay_set_text(const char *text);
 
+/* A panel of several lines ('
+' between them; a line that starts with
+ * '' is highlighted), drawn in the middle of the picture instead of the
+ * line while it is set: the in-game settings menu. NULL or "" for none. */
+void d3d8_overlay_set_menu(const char *text);
+
 /* Draws the line over `out` (the swap chain, w x h pixels) at the top-left
  * of the picture, which the display put at (pic_x, pic_y), pic_h pixels
  * tall; the glyphs are scaled with the picture, as they were when the line

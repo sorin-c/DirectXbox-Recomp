@@ -22,9 +22,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define OVERLAY_W    512
-#define OVERLAY_H     28
+#define OVERLAY_W    720      /* the bitmap; a line uses what it measures */
+#define OVERLAY_H    480
+#define LINE_H        28      /* one line, padding included */
+#define LINE_STEP     24      /* line to line in a panel of several */
 #define OVERLAY_PAD    8      /* from the picture's top-left corner, in 480-line pixels */
+#define MENU_ALPHA   0.80f    /* a centred panel's backing (the menu) */
+#define LINE_ALPHA   0.45f    /* the corner line's (the frame-rate counter) */
 
 static struct {
     int             tried;     /* creation attempted */
@@ -44,7 +48,8 @@ static struct {
 #endif
     void           *bits;      /* the DIB's pixels, BGRA top-down */
     int             text_w;    /* what the last render measured */
-    char            text[128];
+    int             text_h;
+    char            text[2048];
 } g;
 
 /* b7 in both stages: the four texture stages a title can use are b0..b3 and
@@ -70,11 +75,12 @@ static const char kShaderSource[] =
     "Texture2D<float4> tex : register(t8);\n"
     "float4 ps_main(VSOut i) : SV_Target {\n"
     "    int2 p = int2(i.uv);\n"
-    "    float a = tex.Load(int3(p, 0)).r;\n"
-    /* The glyphs are white on black, so the red channel is coverage. A dark
-     * panel under them keeps the text readable over a bright frame. */
-    "    float3 rgb = lerp(float3(0, 0, 0), float3(1, 1, 1), a);\n"
-    "    return float4(rgb, max(a, 0.45));\n"
+    "    float3 t = tex.Load(int3(p, 0)).rgb;\n"
+    /* The glyphs are drawn on black, so the brightest channel is coverage
+     * (a highlighted menu line is yellow, not white). A dark panel under
+     * them keeps the text readable over a bright frame: size.z deep. */
+    "    float a = max(t.r, max(t.g, t.b));\n"
+    "    return float4(t, max(a, size.z));\n"
     "}\n";
 
 #if !defined(_WIN32)
@@ -180,26 +186,47 @@ static const uint8_t kGlyphs[94 * 8] = {
 /* Fill the bitmap with `text`, white on black, each glyph at 2x: 14 pixels
  * across (the glyphs leave their eighth column blank) and 16 down. Returns
  * the width drawn, padding included. */
-static int glyph_render(uint32_t *bits, const char *text, int len)
+static int glyph_render(uint32_t *bits, const char *text, int len, int *height)
 {
-    const int scale = 2, advance = 7 * scale, left = 6, top = (OVERLAY_H - 8 * scale) / 2;
-    int i, row, col, x = left;
+    const int scale = 2, advance = 7 * scale, left = 6;
+    int i, row, col, x = left, widest = 0, line = 0, top = (LINE_H - 8 * scale) / 2;
+    uint32_t ink = 0xFFFFFFFFu;
 
     for (i = 0; i < OVERLAY_W * OVERLAY_H; i++)
         bits[i] = 0xFF000000u;                  /* opaque black, as ETO_OPAQUE */
-    for (i = 0; i < len && x + advance <= OVERLAY_W; i++, x += advance) {
+    for (i = 0; i < len; i++) {
         unsigned char c = (unsigned char)text[i];
         const uint8_t *g;
 
-        if (c < 33 || c > 126)
-            continue;                           /* space, or nothing to draw */
-        g = &kGlyphs[(c - 33) * 8];
-        for (row = 0; row < 8 * scale; row++)
-            for (col = 0; col < 8 * scale; col++)
-                if (g[row / scale] & (1u << (col / scale)) && x + col < OVERLAY_W)
-                    bits[(top + row) * OVERLAY_W + x + col] = 0xFFFFFFFFu;
+        if (c == '\n') {
+            if (x > widest) widest = x;
+            x = left;
+            line++;
+            top = (LINE_H - 8 * scale) / 2 + line * LINE_STEP;
+            ink = 0xFFFFFFFFu;
+            if (top + 8 * scale > OVERLAY_H)
+                break;
+            continue;
+        }
+        if (c == 1) {                           /* a highlighted line */
+            ink = 0xFF40DCFFu;                  /* yellow, BGRA */
+            continue;
+        }
+        if (x + advance > OVERLAY_W)
+            continue;
+        if (c >= 33 && c <= 126) {
+            g = &kGlyphs[(c - 33) * 8];
+            for (row = 0; row < 8 * scale; row++)
+                for (col = 0; col < 8 * scale; col++)
+                    if (g[row / scale] & (1u << (col / scale)) && x + col < OVERLAY_W)
+                        bits[(top + row) * OVERLAY_W + x + col] = ink;
+        }
+        x += advance;
     }
-    return x + left > OVERLAY_W ? OVERLAY_W : x + left;
+    if (x > widest) widest = x;
+    *height = line ? (line * LINE_STEP + LINE_H) : LINE_H;
+    if (*height > OVERLAY_H) *height = OVERLAY_H;
+    return widest + left > OVERLAY_W ? OVERLAY_W : widest + left;
 }
 #endif
 
@@ -331,10 +358,10 @@ static int overlay_create(void)
 static int overlay_set_text(const char *text)
 {
 #if defined(_WIN32)
-    wchar_t wide[128];
+    wchar_t wide[256];
     RECT rect;
     SIZE extent;
-    int i;
+    int i, start, line, n;
 #endif
     int len;
 
@@ -346,20 +373,41 @@ static int overlay_set_text(const char *text)
     memcpy(g.text, text, (size_t)len);
     g.text[len] = '\0';
 #if defined(_WIN32)
-    for (i = 0; i < len; i++)
-        wide[i] = (wchar_t)(unsigned char)g.text[i];
-
+    /* One line, or several separated by '\n' (the settings menu); a line
+     * that starts with '\x01' is drawn highlighted. */
     rect.left = rect.top = 0;
     rect.right = OVERLAY_W;
     rect.bottom = OVERLAY_H;
     memset(g.bits, 0, (size_t)OVERLAY_W * OVERLAY_H * 4);
-    if (!GetTextExtentPoint32W(g.dc, wide, len, &extent))
-        extent.cx = OVERLAY_W;
-    g.text_w = extent.cx + 12 > OVERLAY_W ? OVERLAY_W : (int)extent.cx + 12;
-    ExtTextOutW(g.dc, 6, 4, ETO_OPAQUE, &rect, wide, (UINT)len, NULL);
+    ExtTextOutW(g.dc, 0, 0, ETO_OPAQUE, &rect, L"", 0, NULL);
+    g.text_w = 0;
+    for (start = 0, line = 0; start <= len && 4 + line * LINE_STEP + LINE_STEP <= OVERLAY_H; line++) {
+        int end = start, hi = 0;
+        while (end < len && g.text[end] != '\n')
+            end++;
+        if (start < end && g.text[start] == 1) {
+            hi = 1;
+            start++;
+        }
+        n = end - start;
+        if (n > (int)(sizeof wide / sizeof wide[0])) n = (int)(sizeof wide / sizeof wide[0]);
+        for (i = 0; i < n; i++)
+            wide[i] = (wchar_t)(unsigned char)g.text[start + i];
+        SetTextColor(g.dc, hi ? RGB(255, 220, 64) : RGB(255, 255, 255));
+        if (n && GetTextExtentPoint32W(g.dc, wide, n, &extent) &&
+            (int)extent.cx + 12 > g.text_w)
+            g.text_w = (int)extent.cx + 12;
+        if (n)
+            ExtTextOutW(g.dc, 6, 4 + line * LINE_STEP, 0, NULL, wide, (UINT)n, NULL);
+        start = end + 1;
+    }
+    SetTextColor(g.dc, RGB(255, 255, 255));
+    if (g.text_w > OVERLAY_W) g.text_w = OVERLAY_W;
+    g.text_h = line > 1 ? (line - 1) * LINE_STEP + LINE_H : LINE_H;
+    if (g.text_h > OVERLAY_H) g.text_h = OVERLAY_H;
     GdiFlush();
 #else
-    g.text_w = glyph_render((uint32_t *)g.bits, g.text, len);
+    g.text_w = glyph_render((uint32_t *)g.bits, g.text, len, &g.text_h);
 #endif
 
     rhi_image_update(g.texture, 0, NULL, g.bits, OVERLAY_W * 4, 0);
@@ -367,10 +415,16 @@ static int overlay_set_text(const char *text)
 }
 
 static char g_want[128];       /* the line asked for, drawn by each present */
+static char g_want_menu[2048]; /* a centred panel, drawn instead while set */
 
 void d3d8_overlay_set_text(const char *text)
 {
     snprintf(g_want, sizeof g_want, "%s", text ? text : "");
+}
+
+void d3d8_overlay_set_menu(const char *text)
+{
+    snprintf(g_want_menu, sizeof g_want_menu, "%s", text ? text : "");
 }
 
 void d3d8_overlay_present(RhiView *out, unsigned width, unsigned height,
@@ -384,7 +438,8 @@ void d3d8_overlay_present(RhiView *out, unsigned width, unsigned height,
     /* The size it had drawn into a 480-line frame and scaled with it, in
      * whole steps so the glyphs stay sharp. */
     unsigned scale = (pic_h + 240) / 480;
-    const char *text = g_want;
+    const char *text = g_want_menu[0] ? g_want_menu : g_want;
+    int centred = g_want_menu[0] != '\0';
 
     if (scale < 1) scale = 1;
     if (!text[0] || !out || !width || !height)
@@ -396,13 +451,23 @@ void d3d8_overlay_present(RhiView *out, unsigned width, unsigned height,
 
     if (!(mapped = rhi_buffer_map(g.cb, RHI_MAP_WRITE_DISCARD)))
         goto restore;
-    c.x = -1.0f + 2.0f * (float)(pic_x + OVERLAY_PAD * scale) / (float)width;
-    c.y =  1.0f - 2.0f * (float)(pic_y + OVERLAY_PAD * scale) / (float)height;
+    if (centred) {
+        /* The menu: in the middle of the picture (pic_x, pic_y and pic_h
+         * frame it; its width is the picture's 4:3 or wider, so the middle
+         * of the window is the middle of the picture). */
+        float cx = (float)width * 0.5f, cy = (float)pic_y + (float)pic_h * 0.5f;
+        c.x = -1.0f + 2.0f * (cx - (float)(g.text_w * scale) * 0.5f) / (float)width;
+        c.y =  1.0f - 2.0f * (cy - (float)(g.text_h * scale) * 0.5f) / (float)height;
+    } else {
+        c.x = -1.0f + 2.0f * (float)(pic_x + OVERLAY_PAD * scale) / (float)width;
+        c.y =  1.0f - 2.0f * (float)(pic_y + OVERLAY_PAD * scale) / (float)height;
+    }
     c.w =  2.0f * (float)(g.text_w * scale) / (float)width;
-    c.h =  2.0f * (float)(OVERLAY_H * scale) / (float)height;
+    c.h =  2.0f * (float)(g.text_h * scale) / (float)height;
     c.tex_w = (float)g.text_w;
-    c.tex_h = (float)OVERLAY_H;
-    c.pad0 = c.pad1 = 0.0f;
+    c.tex_h = (float)g.text_h;
+    c.pad0 = centred ? MENU_ALPHA : LINE_ALPHA;
+    c.pad1 = 0.0f;
     memcpy(mapped, &c, sizeof c);
     rhi_buffer_unmap(g.cb);
 
@@ -449,5 +514,6 @@ void d3d8_overlay_shutdown(void)
     g.bits = NULL;
     g.text[0] = '\0';
     g.text_w = 0;
+    g.text_h = 0;
     g.tried = 0;
 }

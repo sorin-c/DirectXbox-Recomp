@@ -879,6 +879,85 @@ const char *recomp_config_lookup(const char *env_name, const char *key)
     return from_file(key);
 }
 
+/* One setting changed while the title runs (the in-game settings menu):
+ * the value every later lookup returns, and the same line in the settings
+ * file rewritten in place, so the comments and every other line stay as
+ * they were. A key the file does not have yet is appended. Returns 1 when
+ * the file was written. */
+int recomp_config_set(const char *key, const char *value)
+{
+    FILE *f;
+    char *text = NULL, *out = NULL;
+    long size = 0;
+    size_t klen, cap, o = 0;
+    const char *p;
+    int found = 0;
+
+    if (!key || !*key || !value)
+        return 0;
+    if (!g_loaded)
+        load_and_report();
+    store(key, value);
+    if (!g_have_path)
+        return 0;
+    f = fopen(g_path, "rb");
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (size > 0 && (text = (char *)malloc((size_t)size + 1)) != NULL) {
+            size = (long)fread(text, 1, (size_t)size, f);
+            text[size] = '\0';
+        } else {
+            size = 0;
+        }
+        fclose(f);
+    }
+    klen = strlen(key);
+    cap = (size_t)size + klen + strlen(value) + 16;
+    if (!(out = (char *)malloc(cap))) {
+        free(text);
+        return 0;
+    }
+    for (p = text ? text : ""; *p; ) {
+        const char *eol = strchr(p, '\n'), *q = p;
+        size_t n = eol ? (size_t)(eol - p) + 1 : strlen(p);
+
+        while (q < p + n && (*q == ' ' || *q == '\t'))
+            q++;
+        if (!found && strncmp(q, key, klen) == 0) {
+            const char *r = q + klen;
+            while (*r == ' ' || *r == '\t')
+                r++;
+            if (*r == '=') {
+                int crlf = n >= 2 && p[n - 2] == '\r';
+                o += (size_t)sprintf(out + o, "%s = %s%s", key, value,
+                                     eol ? (crlf ? "\r\n" : "\n") : "");
+                found = 1;
+                p += n;
+                continue;
+            }
+        }
+        memcpy(out + o, p, n);
+        o += n;
+        p += n;
+    }
+    if (!found)
+        o += (size_t)sprintf(out + o, "%s%s = %s\n",
+                             o && out[o - 1] != '\n' ? "\n" : "", key, value);
+    free(text);
+    make_parents(g_path);
+    f = fopen(g_path, "wb");
+    if (!f) {
+        free(out);
+        return 0;
+    }
+    fwrite(out, 1, o, f);
+    fclose(f);
+    free(out);
+    return 1;
+}
+
 const char *recomp_config_path(void)
 {
     if (!g_loaded)

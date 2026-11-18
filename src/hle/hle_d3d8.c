@@ -166,6 +166,7 @@ static unsigned long g_shadow_swaps;
 
 #ifdef _WIN32
 #define SHADOW_WM_DESTROY (WM_APP + 1)
+#define SHADOW_WM_FULLSCREEN (WM_APP + 2)   /* the settings menu: wp = on */
 #else
 #include "host.h"
 #endif
@@ -512,6 +513,9 @@ static LRESULT CALLBACK shadow_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         fflush(stderr);
         xbox_HostExit("window closed");
         return 0;
+    case SHADOW_WM_FULLSCREEN:           /* the settings menu, from another thread */
+        shadow_set_fullscreen(hwnd, wp != 0);
+        return 0;
     case SHADOW_WM_DESTROY:              /* DestroyWindow only works on this thread */
         DestroyWindow(hwnd);
         return 0;
@@ -732,6 +736,19 @@ static int shadow_key_down(int vk)
 #define SHADOW_KEY_F9   VK_F9
 #define SHADOW_KEY_F10  VK_F10
 #define SHADOW_KEY_F11  VK_F11
+#define SHADOW_KEY_F2   VK_F2
+#define SHADOW_KEY_ESC  VK_ESCAPE
+
+int hle_fullscreen(void)
+{
+    return g_shadow_fullscreen;
+}
+
+void hle_set_fullscreen(int on)
+{
+    if (g_shadow_hwnd)
+        PostMessageA(g_shadow_hwnd, SHADOW_WM_FULLSCREEN, on ? 1 : 0, 0);
+}
 
 #else
 /* ------------------------------------------- the window, everywhere else
@@ -856,6 +873,20 @@ static int shadow_key_down(int key)
 #define SHADOW_KEY_F9   HOST_KEY_F9
 #define SHADOW_KEY_F10  HOST_KEY_F10
 #define SHADOW_KEY_F11  HOST_KEY_F11
+/* The shell reports no F2 or Esc yet: the settings menu opens from a pad
+ * (Start+Back) there. */
+#define SHADOW_KEY_F2   (-1)
+#define SHADOW_KEY_ESC  (-1)
+
+int hle_fullscreen(void)
+{
+    return g_shadow_fullscreen;
+}
+
+void hle_set_fullscreen(int on)
+{
+    (void)on;                            /* the shell's Option/Cmd+Enter only, for now */
+}
 #endif
 
 /* The surfaces the XDK sets as target and depth inside CreateDevice -- the
@@ -2322,6 +2353,55 @@ static void ram_dump_at_swap(void)
  * is complete. Checked every 50 ms at a swap; nothing is read when the
  * variable is unset. */
 static char g_shot_path[1024];
+/* "screen <file>": the window as the last present left it, the overlay and
+ * the settings menu included (xbox_D3D8KeepPresented), written a frame later
+ * by screen_shot_poll. */
+static char g_screen_path[1024];
+static int  g_screen_wait;
+
+static void screen_shot_poll(void)
+{
+    const uint8_t *px;
+    UINT w = 0, h = 0, x, y, pad;
+    char tmp[1100];
+    uint8_t hdr[54];
+    uint32_t filesz;
+    FILE *f;
+
+    if (!g_screen_path[0] || --g_screen_wait > 0)
+        return;
+    px = xbox_D3D8Presented(&w, &h);
+    if (!px || !w || !h)
+        return;                          /* nothing kept yet: next frame */
+    snprintf(tmp, sizeof tmp, "%s.tmp", g_screen_path);
+    pad = (4 - ((w * 3) & 3)) & 3;
+    filesz = 54 + (w * 3 + pad) * h;
+    f = fopen(tmp, "wb");
+    if (f) {
+        memset(hdr, 0, sizeof hdr);
+        hdr[0] = 'B'; hdr[1] = 'M';
+        memcpy(hdr + 2, &filesz, 4);
+        hdr[10] = 54; hdr[14] = 40;
+        memcpy(hdr + 18, &w, 4);
+        memcpy(hdr + 22, &h, 4);
+        hdr[26] = 1; hdr[28] = 24;
+        fwrite(hdr, 1, 54, f);
+        for (y = h; y-- > 0; ) {         /* bottom-up, BGR */
+            const uint8_t *row = px + (size_t)y * w * 4u;
+            uint8_t zero[3] = { 0, 0, 0 };
+            for (x = 0; x < w; x++) {
+                uint8_t bgr[3] = { row[x * 4 + 2], row[x * 4 + 1], row[x * 4 + 0] };
+                fwrite(bgr, 1, 3, f);
+            }
+            fwrite(zero, 1, pad, f);
+        }
+        fclose(f);
+        remove(g_screen_path);
+        rename(tmp, g_screen_path);
+    }
+    xbox_D3D8KeepPresented(FALSE);
+    g_screen_path[0] = 0;
+}
 
 static void shot_request_poll(void)
 {
@@ -2344,7 +2424,7 @@ static void shot_request_poll(void)
             fflush(stderr);
         }
     }
-    if (!req || g_shot_path[0])
+    if (!req || g_shot_path[0] || g_screen_path[0])
         return;
     now = GetTickCount64();
     if (now < next)
@@ -2363,6 +2443,15 @@ static void shot_request_poll(void)
     p = buf;
     while (*p == ' ' || *p == '\t')
         p++;
+    if (strncmp(p, "screen ", 7) == 0) {
+        p += 7;
+        while (*p == ' ')
+            p++;
+        snprintf(g_screen_path, sizeof g_screen_path, "%s", p);
+        g_screen_wait = 2;
+        xbox_D3D8KeepPresented(TRUE);
+        return;
+    }
     if (strncmp(p, "capture ", 8) == 0) {
         p += 8;
         while (*p == ' ')
@@ -2380,6 +2469,7 @@ static void shot_request_poll(void)
 static void shadow_dump_frame(void)
 {
     ram_dump_at_swap();
+    screen_shot_poll();
     shot_request_poll();
     static const char *prefix;
     static int configured, every = 300, written, keep_last, max_files = 24;
@@ -3085,6 +3175,7 @@ static void held_redraw(void)
         g_overlay_set = -1;
     }
     d3d8_overlay_set_text(g_overlay_shown ? g_overlay_line : NULL);
+    d3d8_overlay_set_menu(hle_settings_menu_text());
     xbox_D3D8Represent();
 }
 
@@ -3123,6 +3214,20 @@ static void overlay_frame(void)
         fflush(stderr);
     }
 
+    {
+        /* The settings menu (hle_settings_menu.c): F2 opens and closes it,
+         * Esc closes it; a pad's Start+Back reaches it through the input. */
+        static int f2_was_down, esc_was_down;
+        int f2 = SHADOW_KEY_F2 >= 0 && shadow_key_down(SHADOW_KEY_F2);
+        int esc = SHADOW_KEY_ESC >= 0 && shadow_key_down(SHADOW_KEY_ESC);
+        if (f2 && !f2_was_down)
+            hle_settings_menu_toggle();
+        else if (esc && !esc_was_down && hle_settings_menu_open())
+            hle_settings_menu_toggle();
+        f2_was_down = f2;
+        esc_was_down = esc;
+        d3d8_overlay_set_menu(hle_settings_menu_text());
+    }
     f9  = shadow_key_down(SHADOW_KEY_F9);
     f10 = shadow_key_down(SHADOW_KEY_F10);
     f11 = shadow_key_down(SHADOW_KEY_F11);

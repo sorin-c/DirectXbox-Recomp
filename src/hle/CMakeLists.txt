@@ -20,6 +20,7 @@ add_library(xbox_hle STATIC
     hle_d3d8_vertex.c
     hle_d3d8_record.c
     hle_d3d8_interp.c
+    hle_settings_menu.c
     d3d8_capture.c
     hle_dsound.c
     hle_dsound_3d.c
