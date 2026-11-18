@@ -760,9 +760,15 @@ static int prepare_frame(void)
 
         if (d->key.ff_worlds) {
             prims3d += d->key.prims;
-            if (d->match < 0 || d->tier != 1 || !prev->draws[d->match].key.ff_worlds)
+            if (d->match < 0 || !prev->draws[d->match].key.ff_worlds)
                 continue;
             matched += d->key.prims;
+            /* A looser match (tier 2 or 3: the same shape and textures, not
+             * the same bytes) counts as matched, so it does not hold the
+             * frame, but is drawn as N has it (set_draw_transforms): at sea
+             * those were different towns' pieces. */
+            if (d->tier != 1)
+                continue;
             prepare_ff(i, ff_of(prev, d->match), ff_of(cur, i), d->key.ff_worlds, &d->cut);
             if (d->cut)
                 cut += d->key.prims;
@@ -1138,6 +1144,36 @@ void hle_d3d8_interp_init(void)
     fprintf(stderr, "[INTERP] frame interpolation: %d frames shown for each the title "
             "draws (RECOMP_FRAME_INTERP)\n", n);
     fflush(stderr);
+}
+
+/* The in-game settings menu (hle_settings.h): frames shown for each the
+ * title draws, now. 1 turns interpolation off at the next frame (the kept
+ * frames are let go there); 2 or more turns it on, setting it up if the run
+ * started with it off. */
+int hle_frame_interp(void)
+{
+    return g_on ? g_multiple : 1;
+}
+
+void hle_set_frame_interp(int n)
+{
+    if (n < 2) {
+        g_on = 0;
+        return;
+    }
+    if (n > INTERP_MAX_MULTIPLE)
+        n = INTERP_MAX_MULTIPLE;
+    if (hle_d3d8_defer_on())
+        return;
+    if (!g_qpf) {
+        LARGE_INTEGER f;
+        QueryPerformanceFrequency(&f);
+        g_qpf = f.QuadPart;
+        g_redraw_est = g_qpf / 500;
+        xbox_Nv2aFlipGateSetIdle(gate_idle);
+    }
+    g_multiple = n;
+    g_on = 1;
 }
 
 void hle_d3d8_interp_frame_end(void)

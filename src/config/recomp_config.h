@@ -67,6 +67,10 @@ int recomp_make_dirs(const char *path);
  * that source. The returned string is owned here and valid for the life
  * of the process. */
 const char *recomp_config_lookup(const char *env_name, const char *key);
+/* Change one setting while running: later lookups see `value`, and the
+ * settings file's line for `key` is rewritten (appended if missing).
+ * Returns 1 when the file was written. */
+int recomp_config_set(const char *key, const char *value);
 
 /* The same, parsed, with a fallback for absent or unreadable values.
  * Booleans accept 1/0, on/off, yes/no, true/false, and an empty

@@ -23,6 +23,7 @@
 #include "input_host.h"
 #include "input_bindings.h"
 #include "recomp_config.h"   /* recomp_headless */
+#include "hle_settings.h"    /* the in-game settings menu */
 
 /* <windows.h> on Windows, the POSIX shim (GetTickCount64) elsewhere. */
 #include "platform/xbox_winnt.h"
@@ -396,6 +397,9 @@ bool recomp_input_host_sample_port(unsigned port, RecompInputGamepad *gamepad)
         fake_input(gamepad);
         seq_input(gamepad);
     }
+    /* The in-game settings menu (hle_settings_menu.c): Start+Back opens it,
+     * and while it is open the game reads nothing. */
+    hle_settings_menu_input(port, gamepad);
     return true;
 }
 
