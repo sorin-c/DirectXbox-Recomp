@@ -393,7 +393,7 @@ void d3d8_states_apply_sampler(DWORD stage)
     {
         UINT forced = d3d8_display_policy()->anisotropy;
 
-        if (forced > 1 &&
+        if (forced >= 1 &&
             (sd.filter == RHI_FILTER_LINEAR ||
              sd.filter == RHI_FILTER_MIN_MAG_LINEAR_MIP_POINT ||
              sd.filter == RHI_FILTER_MIN_LINEAR_MAG_MIP_POINT ||

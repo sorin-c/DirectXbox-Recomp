@@ -49,15 +49,15 @@ const D3D8DisplayPolicy *d3d8_display_policy(void)
             g_policy.scale = (UINT)n;
         }
 
-        g_policy.anisotropy = 1;
+        g_policy.anisotropy = 0;           /* off: the title's own filtering */
         v = recomp_config_lookup("RECOMP_ANISO", "anisotropy");
         if (v && *v) {
-            long a = strtol(v, NULL, 10);
+            long a = strcmp(v, "off") == 0 ? 0 : strtol(v, NULL, 10);
 
-            if (a < 1 || a > 16) {
-                fprintf(stderr, "D3D8 display: RECOMP_ANISO=%s is not a whole number "
-                        "from 1 to 16; leaving the title's own filtering\n", v);
-                a = 1;
+            if (a < 0 || a > 16) {
+                fprintf(stderr, "D3D8 display: RECOMP_ANISO=%s is not off or a whole "
+                        "number from 0 to 16; leaving the title's own filtering\n", v);
+                a = 0;
             }
             g_policy.anisotropy = (UINT)a;
         }
@@ -106,7 +106,7 @@ const D3D8DisplayPolicy *d3d8_display_policy(void)
                     g_policy.centre_2d ? " All 2D but whole-screen passes is kept at 4:3."
                                        : "");
         }
-        if (g_policy.anisotropy > 1)
+        if (g_policy.anisotropy >= 1)
             fprintf(stderr, "D3D8 display: anisotropic filtering forced to %ux where the "
                     "title filters linearly\n", g_policy.anisotropy);
     }
