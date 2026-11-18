@@ -900,6 +900,44 @@ int recomp_config_int(const char *env_name, const char *key, int fallback)
     return (int)n;
 }
 
+/* RECOMP_HEADLESS=1, or `headless = 1` in the title's settings file: a run
+ * driven by a test script on a desk where someone is working.
+ *
+ * RECOMP_WINDOW_BACKGROUND=1 keeps the focus where it is, but its window is
+ * still on the screen, on the taskbar, and the person's own keyboard and pads
+ * still reach the game -- a script's presses and theirs mixed, and a pad
+ * resting in another slot steering the test. Headless is that switch and
+ * more: the window opens off every monitor and off the taskbar and Alt+Tab
+ * (it is still a shown window, so the device presents and frames are drawn
+ * and timed exactly as in play), no real device is read on any port and
+ * nothing is sent to one (rumble), and the only input is the script's
+ * (RECOMP_INPUT_SEQ, RECOMP_INPUT_LIVE, RECOMP_FAKE_INPUT). Pictures come
+ * from inside the game (RECOMP_SHOT_REQUEST, src/hle/hle_d3d8.c), because
+ * nothing on the desktop can be photographed. It implies the background
+ * switch, which is set here so every place that reads that one agrees. */
+int recomp_headless(void)
+{
+    static int v = -1;
+
+    if (v < 0) {
+        v = recomp_config_bool("RECOMP_HEADLESS", "headless", 0);
+        if (v) {
+            const char *bg = getenv("RECOMP_WINDOW_BACKGROUND");
+            if (!bg || !*bg || strcmp(bg, "0") == 0) {
+#if defined(_WIN32)
+                _putenv("RECOMP_WINDOW_BACKGROUND=1");
+#else
+                setenv("RECOMP_WINDOW_BACKGROUND", "1", 1);
+#endif
+            }
+            fprintf(stderr, "[CONFIG] headless: the window is off-screen, real input "
+                    "devices are ignored, only scripted input is read\n");
+            fflush(stderr);
+        }
+    }
+    return v;
+}
+
 double recomp_config_float(const char *env_name, const char *key, double fallback)
 {
     const char *v = recomp_config_lookup(env_name, key);

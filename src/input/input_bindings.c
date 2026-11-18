@@ -1190,6 +1190,11 @@ unsigned recomp_bindings_present_mask(void)
     unsigned long long now;
     int i;
 
+    /* Headless (recomp_headless): controller 1 is the script, and it is the
+     * only controller there is. A pad someone has in another slot is not
+     * shown to the title at all, so it cannot join or steer the test. */
+    if (recomp_headless())
+        return 1u;
     recomp_bindings_init();
     now = now_ms();
     if (mask && now < next)
@@ -1212,6 +1217,8 @@ unsigned recomp_bindings_present_mask(void)
 
 void recomp_bindings_rumble(unsigned port, unsigned short low, unsigned short high)
 {
+    if (recomp_headless())
+        return;                     /* nobody's pad shakes for a test */
     recomp_bindings_init();
     if (port < PORTS && g_ctl[port].device == DEV_PAD)
         recomp_pad_rumble(g_ctl[port].pad, low, high);
