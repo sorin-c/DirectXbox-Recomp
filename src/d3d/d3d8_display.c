@@ -185,6 +185,18 @@ void d3d8_display_scene_size(UINT guest_w, UINT guest_h,
     if (scene_h) *scene_h = guest_h * p->scale;
 }
 
+/* A frame the title called 4:3 (xbox_D3D8SetWideFrames(FALSE)) in
+ * widescreen, from a buffer wider than 4:3: a title with a 16:9 mode of its
+ * own renders such screens into its wide buffer as the 4:3 layout with more
+ * background either side (Pirates!' front end, 720x480). Shown as that
+ * centre at 4:3, between bars, rather than at the buffer's own shape (a
+ * little wide) or stretched to 16:9. */
+static int d3d8_display_narrow_centre(UINT scene_w, UINT scene_h)
+{
+    return d3d8_display_policy()->widescreen && !d3d8_display_wide_now() &&
+           scene_w && scene_h && (unsigned long long)scene_w * 3u > (unsigned long long)scene_h * 4u + scene_h / 8u;
+}
+
 void d3d8_display_output_shape(UINT scene_w, UINT scene_h,
                                UINT *shape_w, UINT *shape_h)
 {
@@ -195,6 +207,9 @@ void d3d8_display_output_shape(UINT scene_w, UINT scene_h,
          * squeeze left in. */
         if (shape_w) *shape_w = 16;
         if (shape_h) *shape_h = 9;
+    } else if (d3d8_display_narrow_centre(scene_w, scene_h)) {
+        if (shape_w) *shape_w = 4;
+        if (shape_h) *shape_h = 3;
     } else {
         if (shape_w) *shape_w = scene_w;
         if (shape_h) *shape_h = scene_h;
@@ -548,6 +563,15 @@ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
         if (crop && gw > crop * 4u) {
             skip_w = (UINT)((unsigned long long)crop * scene_w / gw);
             used_w = scene_w - skip_w;
+        }
+    }
+    if (d3d8_display_narrow_centre(scene_w, scene_h)) {
+        /* A frame the title called 4:3, from a buffer wider than that: its
+         * centre, at 4:3 (d3d8_display_output_shape). */
+        UINT want = (UINT)(((unsigned long long)used_h * 4u) / 3u);
+        if (want < scene_w) {
+            skip_w = (scene_w - want) / 2u;
+            used_w = want;
         }
     }
 
