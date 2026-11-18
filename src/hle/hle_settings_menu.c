@@ -30,17 +30,13 @@
 #include "input_host.h"
 #include "recomp_config.h"
 
-int  xbox_D3D8CropBottom(void);                 /* src/d3d/d3d8_display.c */
-void xbox_D3D8SetCropBottom(int rows);
-int  xbox_D3D8CropLeft(void);
-void xbox_D3D8SetCropLeft(int cols);
 
 enum {
     PAD_UP = 0x0001u, PAD_DOWN = 0x0002u, PAD_LEFT = 0x0004u, PAD_RIGHT = 0x0008u,
     PAD_START = 0x0010u, PAD_BACK = 0x0020u,
 };
 
-enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN, LIVE_CROP, LIVE_CROPL };
+enum { LIVE_NONE, LIVE_CAP, LIVE_INTERP, LIVE_FPS, LIVE_FULLSCREEN };
 
 typedef struct {
     const char *label;
@@ -69,10 +65,6 @@ static const Item ITEMS[] = {
       { "1", "2", "4", "8", "16" }, { "off", "2x", "4x", "8x", "16x" } },
     { "Variable refresh",    "vrr",              "RECOMP_VRR",           LIVE_NONE, 2,
       { "0", "1" }, { "off", "on" } },
-    { "Hide bottom band",    "crop_bottom",      "RECOMP_CROP_BOTTOM",   LIVE_CROP, 2,
-      { "0", "8" }, { "off", "on" } },
-    { "Hide left band",      "crop_left",        "RECOMP_CROP_LEFT",     LIVE_CROPL, 2,
-      { "0", "4" }, { "off", "on" } },
 };
 #define ITEM_COUNT ((int)(sizeof ITEMS / sizeof ITEMS[0]))
 
@@ -134,14 +126,6 @@ static int current_index(const Item *it)
     case LIVE_FULLSCREEN:
         v = hle_fullscreen() ? "1" : "0";
         break;
-    case LIVE_CROP:
-        snprintf(buf, sizeof buf, "%d", xbox_D3D8CropBottom());
-        v = buf;
-        break;
-    case LIVE_CROPL:
-        snprintf(buf, sizeof buf, "%d", xbox_D3D8CropLeft());
-        v = buf;
-        break;
     default:
         v = recomp_config_lookup(it->env, it->key);
         if (!v || !*v)
@@ -170,8 +154,6 @@ static void change(int dir)
     case LIVE_INTERP:     hle_set_frame_interp(atoi(it->vals[i])); break;
     case LIVE_FPS:        hle_set_fps_overlay(i); break;
     case LIVE_FULLSCREEN: hle_set_fullscreen(i); break;
-    case LIVE_CROP:       xbox_D3D8SetCropBottom(atoi(it->vals[i])); break;
-    case LIVE_CROPL:      xbox_D3D8SetCropLeft(atoi(it->vals[i])); break;
     default:              g_restart_needed = 1; break;
     }
     fprintf(stderr, "[MENU] %s = %s%s\n", it->key, it->vals[i],

@@ -485,24 +485,18 @@ static int create(UINT taps)
  * RECOMP_CROP_BOTTOM; a title's default from RECOMP_TITLE_CROP_BOTTOM on
  * xbox_d3d8), the rest stretched to fill the picture. Pirates! draws its sea
  * a grey-lavender for the last eight rows of the frame, on the console too;
- * eight of 480 is a 1.7% stretch nobody sees. -1 until read; the settings
- * menu sets it live. */
+ * eight of 480 is a 1.7% stretch nobody sees. A title's default is fixed:
+ * no setting turns it off. -1 until read. */
 static int g_crop_bottom = -1;
-
-void xbox_D3D8SetCropBottom(int rows)
-{
-    g_crop_bottom = rows < 0 ? 0 : rows;
-}
 
 int xbox_D3D8CropBottom(void)
 {
     if (g_crop_bottom < 0) {
 #if defined(RECOMP_TITLE_CROP_BOTTOM)
-        int def = RECOMP_TITLE_CROP_BOTTOM;
+        g_crop_bottom = RECOMP_TITLE_CROP_BOTTOM;
 #else
-        int def = 0;
+        g_crop_bottom = recomp_config_int("RECOMP_CROP_BOTTOM", "crop_bottom", 0);
 #endif
-        g_crop_bottom = recomp_config_int("RECOMP_CROP_BOTTOM", "crop_bottom", def);
         if (g_crop_bottom < 0 || g_crop_bottom > 64)
             g_crop_bottom = 0;
     }
@@ -514,27 +508,21 @@ int xbox_D3D8CropBottom(void)
  * mode only (RECOMP_TITLE_CROP_LEFT_WIDE, applied when the guest presents
  * wider than 4:3): Pirates!' main menu in widescreen leaves its first three
  * and a half columns at the clear colour, a light blue bar, where its map
- * stops short of the edge. Set in the file or live, it applies at any width.
- * -1 until read. */
+ * stops short of the edge. A title's default is fixed; without one,
+ * crop_left applies at any width. -1 until read. */
 static int g_crop_left = -1;
-
-void xbox_D3D8SetCropLeft(int cols)
-{
-    g_crop_left = cols < 0 ? 0 : cols;
-}
 
 int xbox_D3D8CropLeft(void)
 {
     if (g_crop_left < 0) {
-        int def = 0;
 #if defined(RECOMP_TITLE_CROP_LEFT_WIDE)
         UINT gw = d3d8_GetGuestWidth(), gh = d3d8_GetGuestHeight();
-        if (gw && gh && gw * 3u > gh * 4u + gh / 4u)
-            def = RECOMP_TITLE_CROP_LEFT_WIDE;
-        else if (!gw || !gh)
+        if (!gw || !gh)
             return 0;                       /* not known yet: ask again */
+        g_crop_left = gw * 3u > gh * 4u + gh / 4u ? RECOMP_TITLE_CROP_LEFT_WIDE : 0;
+#else
+        g_crop_left = recomp_config_int("RECOMP_CROP_LEFT", "crop_left", 0);
 #endif
-        g_crop_left = recomp_config_int("RECOMP_CROP_LEFT", "crop_left", def);
         if (g_crop_left < 0 || g_crop_left > 64)
             g_crop_left = 0;
     }
