@@ -430,7 +430,7 @@ void recomp_settings_defaults(RecompSettings *s)
     s->hor_plus          = RECOMP_HOR_PLUS_AUTO;
     s->hor_plus_register = RECOMP_REGISTER_AUTO;
     snprintf(s->widescreen_2d, sizeof s->widescreen_2d, "auto");
-    s->anisotropy        = 1;
+    s->anisotropy        = 0;            /* off: the game's own filtering */
     s->fps_overlay       = 0;
     s->fullscreen        = 0;
     s->vrr               = 1;
@@ -503,7 +503,7 @@ int recomp_settings_read(const char *path, RecompSettings *s)
         if ((v = from_table("widescreen_2d")) != NULL)
             snprintf(s->widescreen_2d, sizeof s->widescreen_2d, "%s", v);
         if ((v = from_table("anisotropy")) != NULL)
-            s->anisotropy = clamp_int(atoi(v), 1, 16);
+            s->anisotropy = clamp_int(atoi(v), 0, 16);
         if ((v = from_table("frame_cap")) != NULL)
             snprintf(s->frame_cap, sizeof s->frame_cap, "%s", v);
         if ((v = from_table("fps_overlay")) != NULL)
@@ -673,8 +673,8 @@ int recomp_settings_write(const char *path, const RecompSettings *s)
         "# screens.                                      [RECOMP_WIDESCREEN_2D]\n"
         "widescreen_2d = %s\n"
         "\n"
-        "# Sharpen textures seen at a glancing angle, 1 to 16. The flat layer\n"
-        "# is left alone, which wants no filtering.              [RECOMP_ANISO]\n"
+        "# Sharpen textures seen at a glancing angle: 0 (off, the game's own\n"
+        "# filtering), 1, 2, 4, 8 or 16. 2D is left alone.       [RECOMP_ANISO]\n"
         "anisotropy = %d\n"
         "\n"
         "# Frame pacing: adaptive, 60, 30, or 0 for uncapped.  [RECOMP_FPS_CAP]\n"

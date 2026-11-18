@@ -61,8 +61,8 @@ static const Item ITEMS[] = {
       { "1", "2", "3", "4", "5", "6", "7", "8" }, { "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x" } },
     { "Widescreen (16:9)",   "widescreen",       "RECOMP_WIDESCREEN",    LIVE_NONE, 2,
       { "0", "1" }, { "off", "on" } },
-    { "Texture filtering",   "anisotropy",       "RECOMP_ANISO",         LIVE_NONE, 5,
-      { "1", "2", "4", "8", "16" }, { "off", "2x", "4x", "8x", "16x" } },
+    { "Texture sharpness",   "anisotropy",       "RECOMP_ANISO",         LIVE_NONE, 6,
+      { "0", "1", "2", "4", "8", "16" }, { "off", "1x", "2x", "4x", "8x", "16x" } },
     { "Variable refresh",    "vrr",              "RECOMP_VRR",           LIVE_NONE, 2,
       { "0", "1" }, { "off", "on" } },
 };
@@ -129,8 +129,7 @@ static int current_index(const Item *it)
     default:
         v = recomp_config_lookup(it->env, it->key);
         if (!v || !*v)
-            v = strcmp(it->key, "resolution_scale") == 0 || strcmp(it->key, "anisotropy") == 0
-                    ? "1" : it->vals[0];
+            v = strcmp(it->key, "resolution_scale") == 0 ? "1" : it->vals[0];
         break;
     }
     for (i = 0; i < it->n; i++)

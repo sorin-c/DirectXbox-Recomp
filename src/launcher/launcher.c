@@ -106,6 +106,10 @@ static const char *const *k_frame_caps = k_frame_caps_console;
 
 static RecompSettings g_settings;
 static int            g_frame_cap_index;   /* into k_frame_caps */
+/* Texture sharpness: off (the game's own filtering) or anisotropic at 1-16. */
+static const char *const k_aniso_names[] = { "Off", "1x", "2x", "4x", "8x", "16x", NULL };
+static const int         k_aniso_values[] = { 0, 1, 2, 4, 8, 16 };
+static int            g_aniso_index;       /* into k_aniso_values */
 static int            g_widescreen;        /* the row; settings_save applies it */
 
 static Row  g_video_rows[12];
@@ -213,7 +217,7 @@ static void build_rows(void)
 
     r->label = "Texture sharpness";
     r->help  = "Sharpen textures seen at a glancing angle: floors, walls, roads.";
-    r->kind  = ROW_INT; r->lo = 1; r->hi = 16; r->ival = &g_settings.anisotropy;
+    r->kind  = ROW_CHOICE; r->choices = k_aniso_names; r->ival = &g_aniso_index;
     r++;
 
     r->label = "Frame rate";
@@ -377,6 +381,8 @@ static void row_value(const Row *r, char *out, size_t n)
     case ROW_CHOICE:
         if (r->ival == &g_link_mode)
             snprintf(out, n, "%s", link_mode_label(*r->ival));
+        else if (r->ival == &g_aniso_index)
+            snprintf(out, n, "%s", k_aniso_names[*r->ival]);
         else
             snprintf(out, n, "%s", frame_cap_label(*r->ival));
         break;
@@ -1073,6 +1079,14 @@ static void settings_load(void)
             }
     }
 
+    g_aniso_index = 0;
+    {
+        int i;
+        for (i = 0; i < (int)(sizeof k_aniso_values / sizeof k_aniso_values[0]); i++)
+            if (g_settings.anisotropy >= k_aniso_values[i])
+                g_aniso_index = i;
+    }
+
     g_link_mode = LINK_OFF;
     {
         int i;
@@ -1127,6 +1141,7 @@ static int settings_save(void)
 #endif
     snprintf(g_settings.frame_cap, sizeof g_settings.frame_cap, "%s",
              k_frame_caps[g_frame_cap_index]);
+    g_settings.anisotropy = k_aniso_values[g_aniso_index];
     if (g_link_mode != LINK_BY_HAND)
         snprintf(g_settings.syslink, sizeof g_settings.syslink, "%s",
                  k_link_modes[g_link_mode]);
