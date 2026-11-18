@@ -494,10 +494,42 @@ int xbox_D3D8CropBottom(void)
     return g_crop_bottom;
 }
 
+/* The game's left columns left off the screen the same way (crop_left,
+ * guest columns, RECOMP_CROP_LEFT). A title's default can be for its 16:9
+ * mode only (RECOMP_TITLE_CROP_LEFT_WIDE, applied when the guest presents
+ * wider than 4:3): Pirates!' main menu in widescreen leaves its first three
+ * and a half columns at the clear colour, a light blue bar, where its map
+ * stops short of the edge. Set in the file or live, it applies at any width.
+ * -1 until read. */
+static int g_crop_left = -1;
+
+void xbox_D3D8SetCropLeft(int cols)
+{
+    g_crop_left = cols < 0 ? 0 : cols;
+}
+
+int xbox_D3D8CropLeft(void)
+{
+    if (g_crop_left < 0) {
+        int def = 0;
+#if defined(RECOMP_TITLE_CROP_LEFT_WIDE)
+        UINT gw = d3d8_GetGuestWidth(), gh = d3d8_GetGuestHeight();
+        if (gw && gh && gw * 3u > gh * 4u + gh / 4u)
+            def = RECOMP_TITLE_CROP_LEFT_WIDE;
+        else if (!gw || !gh)
+            return 0;                       /* not known yet: ask again */
+#endif
+        g_crop_left = recomp_config_int("RECOMP_CROP_LEFT", "crop_left", def);
+        if (g_crop_left < 0 || g_crop_left > 64)
+            g_crop_left = 0;
+    }
+    return g_crop_left;
+}
+
 HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
                              RhiView *out, D3D8DisplayFit fit)
 {
-    UINT used_h = scene_h;
+    UINT used_h = scene_h, used_w = scene_w, skip_w = 0;
     RhiOutputState saved;
     RhiViewport vp;
     float blend_factor[4] = { 1, 1, 1, 1 };
@@ -510,6 +542,13 @@ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
         UINT gh = d3d8_GetGuestHeight(), crop = (UINT)xbox_D3D8CropBottom();
         if (crop && gh > crop * 4u)
             used_h = scene_h - (UINT)((unsigned long long)crop * scene_h / gh);
+    }
+    {
+        UINT gw = d3d8_GetGuestWidth(), crop = (UINT)xbox_D3D8CropLeft();
+        if (crop && gw > crop * 4u) {
+            skip_w = (UINT)((unsigned long long)crop * scene_w / gw);
+            used_w = scene_w - skip_w;
+        }
     }
 
     /* Square taps, from the vertical ratio: the horizontal one is the
@@ -526,9 +565,11 @@ HRESULT d3d8_display_resolve(RhiView *scene, UINT scene_w, UINT scene_h,
 
     if ((mapped = rhi_buffer_map(g.cb, RHI_MAP_WRITE_DISCARD)) != NULL) {
         ResolveConstants c;
-        c.origin_x = (float)fit.x;
+        c.ratio_x = (float)used_w / (float)fit.w;
+        /* The shader samples (pixel - origin) * ratio: starting skip_w scene
+         * pixels in is an origin skip_w / ratio screen pixels to the left. */
+        c.origin_x = (float)fit.x - (float)skip_w / c.ratio_x;
         c.origin_y = (float)fit.y;
-        c.ratio_x = (float)scene_w / (float)fit.w;
         c.ratio_y = (float)used_h / (float)fit.h;
         c.texel_x = 1.0f / (float)scene_w;
         c.texel_y = 1.0f / (float)scene_h;

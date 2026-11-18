@@ -1203,6 +1203,9 @@ void           xbox_D3D8KeepPresented(BOOL on);
  * it (d3d8_display.c, crop_bottom): now, and set live. */
 int            xbox_D3D8CropBottom(void);
 void           xbox_D3D8SetCropBottom(int rows);
+/* Guest columns left off the left of the picture (crop_left). */
+int            xbox_D3D8CropLeft(void);
+void           xbox_D3D8SetCropLeft(int cols);
 const uint8_t *xbox_D3D8Presented(UINT *width, UINT *height);
 /* The size the guest presents at, for its screen-space geometry; the HLE
  * sets it from the title's present parameters (d3d8_GetGuestWidth). */
