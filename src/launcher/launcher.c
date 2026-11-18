@@ -770,6 +770,10 @@ static void release_init(void)
                  "There is no home folder to build the game in (HOME is not set).");
         return;
     }
+    /* The game reads its settings file beside itself, in the player's
+     * build folder; so read and write that one here as well, or the
+     * launcher's settings would never reach it. */
+    recomp_settings_set_title_dir(g_user_dir);
     release_status();
 #if defined(__APPLE__)
     release_unquarantine();

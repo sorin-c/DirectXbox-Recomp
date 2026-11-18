@@ -286,6 +286,17 @@ typedef struct RecompSettings {
 void recomp_settings_defaults(RecompSettings *s);
 int  recomp_settings_default_frame_interp(void);
 
+/* A title's display defaults (recomp_config.c), compiled into xbox_config
+ * from its CMakeLists: 0 when it says nothing. */
+int  recomp_title_crop_bottom(void);
+int  recomp_title_crop_left_wide(void);
+int  recomp_title_pixel_offset_scaled(void);
+
+/* Where the title's own settings file (RECOMP_TITLE_SETTINGS_FILE) is, when
+ * not beside the running executable: a release's launcher names the game's
+ * build folder. Call before anything reads a setting. */
+void recomp_settings_set_title_dir(const char *dir);
+
 /* Read the file at `path` into `s`, starting from the defaults. Absent
  * keys keep their default, so an older file gains new settings rather
  * than losing them. Returns 0 if the file could not be read at all. */

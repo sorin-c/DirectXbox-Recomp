@@ -2223,11 +2223,7 @@ static float pixel_offset(float scale)
 
     if (offset < 0.0f) {
         const char *e = getenv("RECOMP_D3D8_PIXEL_OFFSET");
-#if defined(RECOMP_TITLE_PIXEL_OFFSET_SCALED)
-        scaled = 1;
-#else
-        scaled = 0;
-#endif
+        scaled = recomp_title_pixel_offset_scaled();
         if (e && *e) {
             scaled = strcmp(e, "scaled") == 0;
             offset = scaled ? 0.5f : (float)atof(e);
