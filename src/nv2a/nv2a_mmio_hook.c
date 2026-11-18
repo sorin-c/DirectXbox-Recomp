@@ -29,6 +29,8 @@ static int g_mmio_decode_fail = 0;
  * outside the Win32 guard. */
 
 #if defined(_WIN32)
+#include <string.h>
+#include "../platform/mmio_decode.h"   /* mmio_emulate: the forms below miss */
 
 /* ============================================================
  * x86-64 register access helpers
@@ -115,6 +117,18 @@ static int decode_modrm_len(const uint8_t *ip, int has_rex_b)
  * Try to decode and handle the faulting instruction.
  * Returns true if successfully handled, false if unrecognized.
  */
+/* The shared decoder's callbacks (platform/mmio_decode.h), for the forms
+ * the hand decoder below does not know. */
+static uint64_t nv2a_shared_rd(void *dev, uint32_t off, int size)
+{
+    return nv2a_mmio_read((NV2AState *)dev, off, (unsigned int)size);
+}
+
+static void nv2a_shared_wr(void *dev, uint32_t off, uint64_t val, int size)
+{
+    nv2a_mmio_write((NV2AState *)dev, off, val, (unsigned int)size);
+}
+
 static bool decode_and_handle(PCONTEXT ctx, uint32_t mmio_offset, int is_write)
 {
     const uint8_t *ip = (const uint8_t *)ctx->Rip;
@@ -351,6 +365,12 @@ static bool decode_and_handle(PCONTEXT ctx, uint32_t mmio_offset, int is_write)
         g_mmio_write_count++;
         return true;
     }
+
+    /* Anything else the shared decoder knows (TEST and group 1 with an
+     * immediate, the ALU forms, SSE scalar moves): what clang emits for a
+     * volatile register access is not what MSVC does. */
+    if (mmio_emulate(ctx, mmio_offset, nv2a, nv2a_shared_rd, nv2a_shared_wr))
+        return true;
 
     /* Unrecognized instruction */
     g_mmio_decode_fail++;

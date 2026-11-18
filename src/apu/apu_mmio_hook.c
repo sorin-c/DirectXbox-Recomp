@@ -102,6 +102,18 @@ static int decode_modrm_len(const uint8_t *ip, int has_rex_b)
  * Instruction decoder for APU MMIO access
  * ============================================================ */
 
+/* The shared decoder's callbacks (platform/mmio_decode.h), for the forms
+ * the hand decoder below does not know. */
+static uint64_t apu_shared_rd(void *dev, uint32_t off, int size)
+{
+    return mcpx_apu_mmio_read((MCPXAPUState *)dev, off, (unsigned int)size);
+}
+
+static void apu_shared_wr(void *dev, uint32_t off, uint64_t val, int size)
+{
+    mcpx_apu_mmio_write((MCPXAPUState *)dev, off, val, (unsigned int)size);
+}
+
 static bool apu_decode_and_handle(PCONTEXT ctx, uint32_t mmio_offset, int is_write)
 {
     const uint8_t *ip = (const uint8_t *)ctx->Rip;
@@ -269,6 +281,18 @@ static bool apu_decode_and_handle(PCONTEXT ctx, uint32_t mmio_offset, int is_wri
         mcpx_apu_mmio_write(g_apu_state, mmio_offset, mem_val & reg_val, access_size);
         ctx->Rip += prefix_len + 1 + modrm_len;
         g_apu_mmio_write_count++;
+        return true;
+    }
+
+    /* Anything else the shared decoder knows: TEST and group 1 with an
+     * immediate, the ALU forms, the SSE scalar moves. Compilers differ in
+     * what they emit for a volatile register access: zig's clang reads
+     * `if (reg & 0x18)` as `test dword [mem], 0x18` (F7 /0), which MSVC
+     * never does, and a self-building release crashed on it as Miles
+     * Sound System started. */
+    if (mmio_emulate(ctx, mmio_offset, g_apu_state, apu_shared_rd, apu_shared_wr)) {
+        if (is_write) g_apu_mmio_write_count++;
+        else g_apu_mmio_read_count++;
         return true;
     }
 
