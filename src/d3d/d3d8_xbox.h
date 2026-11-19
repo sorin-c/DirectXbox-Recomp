@@ -1324,6 +1324,19 @@ enum {
 };
 void xbox_D3D8SetTwoDPlacement(int placement, uint32_t tag);
 
+/* Edge pinning, for a title with a 16:9 mode of its own whose HUD keeps its
+ * 4:3 positions: in widescreen, on the screen, the title's test is asked
+ * about every draw (the vertex shader handle -- an FVF for fixed function --,
+ * stage 0's texture size and format, 0 without one, the vertices and the
+ * world, view and projection matrices, 16 floats each in D3D row order) and
+ * answers -1 to move it left to the picture's edge, +1 right, 0 to leave it.
+ * Moved by the 4:3 layout's margin, half of what the width has beyond 4:3;
+ * horizontally only. */
+typedef int (*XboxD3D8EdgeTest)(DWORD handle, UINT tex_w, UINT tex_h, UINT tex_format,
+                                const void *vertices, UINT stride, UINT count,
+                                const float *world, const float *view, const float *projection);
+void xbox_D3D8SetEdgeTest(XboxD3D8EdgeTest test);
+
 /* A title's own test for which of its fixed-function draws are screen-space.
  * The renderer knows two kinds: pre-transformed vertices, and a vertex
  * program that does not use the projection. A title can draw its 2D a third
