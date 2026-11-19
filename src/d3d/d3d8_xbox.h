@@ -1329,9 +1329,8 @@ void xbox_D3D8SetTwoDPlacement(int placement, uint32_t tag);
  * about every draw (the vertex shader handle -- an FVF for fixed function --,
  * stage 0's texture size and format, 0 without one, the vertices and the
  * world, view and projection matrices, 16 floats each in D3D row order) and
- * answers -1 to move it left to the picture's edge, +1 right, 0 to leave it.
- * Moved by the 4:3 layout's margin, half of what the width has beyond 4:3;
- * horizontally only. */
+ * answers how far to move it sideways, in the title's pixels (negative to
+ * the left, 0 to leave it); horizontally only. */
 typedef int (*XboxD3D8EdgeTest)(DWORD handle, UINT tex_w, UINT tex_h, UINT tex_format,
                                 const void *vertices, UINT stride, UINT count,
                                 const float *world, const float *view, const float *projection);
