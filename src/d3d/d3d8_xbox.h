@@ -1324,17 +1324,6 @@ enum {
 };
 void xbox_D3D8SetTwoDPlacement(int placement, uint32_t tag);
 
-/* Fill frames, for a title with a 16:9 mode of its own whose screen is laid
- * out for 4:3 over a backdrop: while on (and in widescreen, on the screen),
- * every draw is squeezed to 4:3 about the middle, except the ones the title's
- * test calls backdrop, which are drawn taller instead so they keep their
- * proportions and fill the 16:9 picture. The test gets the draw's vertex
- * shader handle (an FVF for fixed function) and stage 0's texture size and
- * format (0 without one). */
-typedef int (*XboxD3D8BackdropTest)(DWORD handle, UINT tex_w, UINT tex_h, UINT tex_format);
-void xbox_D3D8SetFrameFill(BOOL on);
-void xbox_D3D8SetBackdropTest(XboxD3D8BackdropTest test);
-
 /* A title's own test for which of its fixed-function draws are screen-space.
  * The renderer knows two kinds: pre-transformed vertices, and a vertex
  * program that does not use the projection. A title can draw its 2D a third

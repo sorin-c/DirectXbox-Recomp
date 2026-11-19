@@ -537,16 +537,6 @@ static BOOL two_d_squeeze(float *k_out, float *cx_out);
  * the picture. 1 is off. */
 static float g_3d_vzoom = 1.0f;
 
-/* Fill frames (xbox_D3D8SetFrameFill): a title's 4:3 screen shown at 16:9
- * with its backdrop zoomed to fill the picture and everything else kept at
- * 4:3 in the middle. Per draw: 0 nothing, 1 squeezed to 4:3 about the middle
- * (the 16:9 stretch puts it back in proportion), 2 a backdrop, drawn taller
- * by the same factor about the middle so it keeps its proportions and covers
- * the screen. The title's test says which draws are backdrop. */
-static int                  g_frame_fill;
-static int                  g_fill_mode;
-static XboxD3D8BackdropTest g_backdrop_test;
-
 /* The vertical zoom for the draw in hand, about cy_out in host pixels of
  * the scene, or FALSE: off, a screen-space draw, an offscreen target, or a
  * frame shown at 4:3. */
@@ -2282,21 +2272,6 @@ static void apply_host_viewport(void)
         hv.x = cx + (hv.x - cx) * k;
         hv.width *= k;
     }
-    if (g_fill_mode && g_device_state.height) {
-        float f = ((float)g_device_state.width * 9.0f) /
-                  ((float)g_device_state.height * 16.0f);
-        if (f > 0.0f && f < 1.0f) {
-            if (g_fill_mode == 1) {
-                float mid = (float)g_device_state.width * 0.5f;
-                hv.x = mid + (hv.x - mid) * f;
-                hv.width *= f;
-            } else {
-                float mid = (float)g_device_state.height * 0.5f;
-                hv.y = mid + (hv.y - mid) / f;
-                hv.height /= f;
-            }
-        }
-    }
 
     /* Hor+ for a title that can widen its field of view but not change its
      * aspect: its wider picture is taller by the same amount, so each 3D
@@ -2738,42 +2713,8 @@ int xbox_D3D8GetTwoDPlacement(uint32_t *tag)
 /* Once per screen-space draw, after the shader path has said it is one:
  * where it goes in widescreen. The title's placement when it gave one,
  * otherwise the renderer's judgement from the draw's extent. */
-void xbox_D3D8SetFrameFill(BOOL on)
-{
-    g_frame_fill = on ? 1 : 0;
-}
-
-void xbox_D3D8SetBackdropTest(XboxD3D8BackdropTest test)
-{
-    g_backdrop_test = test;
-}
-
-/* Per draw: which fill treatment it gets (g_fill_mode). */
-static void fill_classify(void)
-{
-    int m = 0;
-
-    if (g_frame_fill && !g_cur_rt && d3d8_display_wide_now()) {
-        IDirect3DBaseTexture8 *t = d3d8_GetStageTexture(0);
-        D3D8TextureInfo ti;
-        UINT w = 0, h = 0, f = 0;
-
-        if (t && d3d8_texture_info(t, &ti)) {
-            w = ti.width;
-            h = ti.height;
-            f = (UINT)ti.format;
-        }
-        m = g_backdrop_test && g_backdrop_test(g_device_state.vertex_shader, w, h, f) ? 2 : 1;
-    }
-    if (m != g_fill_mode) {
-        g_fill_mode = m;
-        apply_host_viewport();
-    }
-}
-
 void d3d8_place_2d_draw(const void *vertices, UINT stride, UINT count)
 {
-    fill_classify();
     /* A fixed-function draw through the title's projection is 3D to the
      * shader path. The title may know better: Max Payne draws its HUD, its
      * menus and its graphic novel as quads at one depth under the camera
