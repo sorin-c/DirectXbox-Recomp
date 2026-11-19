@@ -411,6 +411,17 @@ int recomp_title_crop_left_wide(void)
 #endif
 }
 
+/* RECOMP_TITLE_BUMPERS_AS_TRIGGERS=1: the default pad bindings give LB and
+ * RB the triggers (with LT and RT), not the Xbox's Black and White buttons. */
+int recomp_title_bumpers_as_triggers(void)
+{
+#if defined(RECOMP_TITLE_BUMPERS_AS_TRIGGERS)
+    return RECOMP_TITLE_BUMPERS_AS_TRIGGERS;
+#else
+    return 0;
+#endif
+}
+
 int recomp_title_pixel_offset_scaled(void)
 {
 #if defined(RECOMP_TITLE_PIXEL_OFFSET_SCALED)
