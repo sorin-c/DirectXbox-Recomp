@@ -538,11 +538,11 @@ static BOOL two_d_squeeze(float *k_out, float *cx_out);
 static float g_3d_vzoom = 1.0f;
 
 /* Edge pinning (xbox_D3D8SetEdgeTest): a title with a 16:9 mode of its own
- * that lays its HUD out for 4:3 can have pieces moved sideways to the edges
- * of the wider picture. g_edge_side is the draw in hand's: -1 left, +1 right,
- * 0 where it was. */
+ * that lays its HUD out for 4:3 can have pieces moved sideways towards the
+ * edges of the wider picture. g_edge_dx is the draw in hand's move, in the
+ * title's pixels; 0 where it was. */
 static XboxD3D8EdgeTest g_edge_test;
-static int              g_edge_side;
+static int              g_edge_dx;
 
 /* The vertical zoom for the draw in hand, about cy_out in host pixels of
  * the scene, or FALSE: off, a screen-space draw, an offscreen target, or a
@@ -2279,13 +2279,8 @@ static void apply_host_viewport(void)
         hv.x = cx + (hv.x - cx) * k;
         hv.width *= k;
     }
-    if (g_edge_side) {
-        /* The 4:3 layout's margin of the 16:9 buffer, in the title's
-         * pixels: half of what the width has beyond 4:3. */
-        UINT gw = d3d8_GetGuestWidth(), gh = d3d8_GetGuestHeight();
-        if (gw && gh && gw * 3u > gh * 4u)
-            hv.x += (float)g_edge_side * ((float)gw - (float)gh * 4.0f / 3.0f) * 0.5f * sx;
-    }
+    if (g_edge_dx)
+        hv.x += (float)g_edge_dx * sx;
 
     /* Hor+ for a title that can widen its field of view but not change its
      * aspect: its wider picture is taller by the same amount, so each 3D
@@ -2734,7 +2729,7 @@ void xbox_D3D8SetEdgeTest(XboxD3D8EdgeTest test)
 
 static void edge_classify(const void *vertices, UINT stride, UINT count)
 {
-    int side = 0;
+    int dx = 0;
 
     if (g_edge_test && vertices && stride && count && !g_cur_rt && d3d8_display_wide_now()) {
         IDirect3DBaseTexture8 *t = d3d8_GetStageTexture(0);
@@ -2746,14 +2741,13 @@ static void edge_classify(const void *vertices, UINT stride, UINT count)
             h = ti.height;
             f = (UINT)ti.format;
         }
-        side = g_edge_test(g_device_state.vertex_shader, w, h, f, vertices, stride, count,
-                           (const float *)&g_device_state.transforms[D3DTS_WORLD],
-                           (const float *)&g_device_state.transforms[D3DTS_VIEW],
-                           (const float *)&g_device_state.transforms[D3DTS_PROJECTION]);
-        side = side < 0 ? -1 : side > 0 ? 1 : 0;
+        dx = g_edge_test(g_device_state.vertex_shader, w, h, f, vertices, stride, count,
+                         (const float *)&g_device_state.transforms[D3DTS_WORLD],
+                         (const float *)&g_device_state.transforms[D3DTS_VIEW],
+                         (const float *)&g_device_state.transforms[D3DTS_PROJECTION]);
     }
-    if (side != g_edge_side) {
-        g_edge_side = side;
+    if (dx != g_edge_dx) {
+        g_edge_dx = dx;
         apply_host_viewport();
     }
 }
