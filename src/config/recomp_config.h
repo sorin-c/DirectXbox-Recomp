@@ -291,6 +291,8 @@ int  recomp_settings_default_frame_interp(void);
 int  recomp_title_crop_bottom(void);
 int  recomp_title_crop_left_wide(void);
 int  recomp_title_pixel_offset_scaled(void);
+/* Default pad bindings: LB and RB as the triggers, not Black and White. */
+int  recomp_title_bumpers_as_triggers(void);
 
 /* Where the title's own settings file (RECOMP_TITLE_SETTINGS_FILE) is, when
  * not beside the running executable: a release's launcher names the game's

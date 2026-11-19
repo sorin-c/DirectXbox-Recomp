@@ -311,9 +311,23 @@ static void defaults_for(Controller *c, int port)
     c->deadzone = DEADZONE_DEFAULT;
     for (i = 0; i < (int)(sizeof DEFAULTS / sizeof DEFAULTS[0]); i++) {
         int k = control_index(DEFAULTS[i].control);
+        const char *pad = DEFAULTS[i].pad;
         if (k < 0)
             continue;
-        bind_add(&c->bind[k], DEFAULTS[i].pad, &bad);
+        /* A title can give the bumpers to the triggers: LB pulls the left
+         * trigger and RB the right, as LT and RT still do, and Black and
+         * White keep only their keys (recomp_title_bumpers_as_triggers). */
+        if (recomp_title_bumpers_as_triggers()) {
+            if (strcmp(DEFAULTS[i].control, "black") == 0 ||
+                strcmp(DEFAULTS[i].control, "white") == 0)
+                pad = NULL;
+            else if (strcmp(DEFAULTS[i].control, "ltrigger") == 0)
+                bind_add(&c->bind[k], "pad:lshoulder", &bad);
+            else if (strcmp(DEFAULTS[i].control, "rtrigger") == 0)
+                bind_add(&c->bind[k], "pad:rshoulder", &bad);
+        }
+        if (pad)
+            bind_add(&c->bind[k], pad, &bad);
         if (port == 0 && DEFAULTS[i].key)
             bind_add(&c->bind[k], DEFAULTS[i].key, &bad);
     }
@@ -719,6 +733,8 @@ void recomp_bindings_init(void)
     }
     for (i = 0; i < PORTS; i++)
         describe(&g_ctl[i], g_ctl[i].label, sizeof g_ctl[i].label);
+    if (recomp_title_bumpers_as_triggers())
+        fprintf(stderr, "[INPUT] default pad bindings: LB and RB pull the triggers, as LT and RT do\n");
     fprintf(stderr, "[INPUT] bindings from %s\n",
             g_have_path ? g_path : "the built-in defaults (no config file)");
     for (i = 0; i < PORTS; i++)
